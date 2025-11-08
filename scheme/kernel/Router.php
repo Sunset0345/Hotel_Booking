@@ -357,6 +357,19 @@ class Router
                 return;
             }
         }
+        // If in development, provide helpful debug information about routes and the requested URL
+        if (strtolower(config_item('ENVIRONMENT')) === 'development') {
+            $debug_routes = [];
+            foreach ($this->routes as $r) {
+                $debug_routes[] = [$r['method'], $r['url'], $r['callback']];
+            }
+            $debug_html = '<p>Requested URL: ' . htmlspecialchars($url) . '</p>';
+            $debug_html .= '<p>Request Method: ' . htmlspecialchars($method) . '</p>';
+            $debug_html .= '<h4>Registered routes (method, url, callback)</h4><pre>' . htmlspecialchars(print_r($debug_routes, true)) . '</pre>';
+            empty(config_item('404_override')) ? show_404('404 Not Found', $debug_html) : show_404('404 Not Found', $debug_html, config_item('404_override'));
+            return;
+        }
+
         empty(config_item('404_override')) ? show_404() : show_404('', '', config_item('404_override'));
     }
 

@@ -122,7 +122,7 @@ Class Io {
 			}
 			return $post;
 		}
-		return $_POST[$index];
+		return isset($_POST[$index]) ? $_POST[$index] : NULL;
 	}
 
 	/**
@@ -140,7 +140,7 @@ Class Io {
 			}
 			return $get;
 		}
-		return $_GET[$index];
+		return isset($_GET[$index]) ? $_GET[$index] : NULL;
 	}
 
 	/**
@@ -182,7 +182,7 @@ Class Io {
 			}
 			return $cookie;
 		}
-		return $_COOKIE[$index];
+		return isset($_COOKIE[$index]) ? $_COOKIE[$index] : NULL;
 	}
 
 	/**
@@ -258,7 +258,7 @@ Class Io {
 			}
 			return $server;
 		}
-		return $_SERVER[$index];
+		return isset($_SERVER[$index]) ? $_SERVER[$index] : NULL;
 	}
 
 	/**

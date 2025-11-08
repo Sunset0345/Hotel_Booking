@@ -40,3 +40,18 @@
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 </p>
+
+---
+
+Developer notes (Add Room)
+--------------------------
+
+- URL: /admin/rooms/add (must be logged in as admin)
+- The Add Room form accepts: room_number, room_type, price_per_night, capacity, description, and a single image file.
+- Uploaded images are saved under public/uploads/rooms and the `rooms.image` column stores the relative path (uploads/rooms/filename.jpg).
+- If you don't see uploads, create the folder `public/uploads/rooms` and make it writable by the webserver.
+
+Files changed while implementing Add Room:
+- app/views/admin/rooms_add.php  (form + error display)
+- app/controllers/AdminController.php (POST handler: validation, upload, DB insert)
+

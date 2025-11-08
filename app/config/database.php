@@ -58,13 +58,13 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 */
 
 $database['main'] = array(
-    'driver'	=> '',
-    'hostname'	=> '',
-    'port'		=> '',
-    'username'	=> '',
-    'password'	=> '',
-    'database'	=> '',
-    'charset'	=> '',
+    'driver'	=> 'mysql',
+    'hostname'	=> 'localhost',
+    'port'		=> '3306',
+    'username'	=> 'admin',
+    'password'	=> 'admin',
+    'database'	=> 'hotel_booking',
+    'charset'	=> 'utf8mb4',
     'dbprefix'	=> '',
     // Optional for SQLite
     'path'      => ''

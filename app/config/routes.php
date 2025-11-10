@@ -4,6 +4,8 @@ $router->get('/user', 'UserController::index');
 $router->get('/user/profile', 'UserController::profile');
 $router->get('/user/bookings', 'UserController::bookings');
 $router->match('/user/messages', 'UserController::messages', ['GET', 'POST']);
+// Backwards-compatible alias: support singular /user/message URL which some users may type manually
+$router->get('/user/message', 'UserController::messages');
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 /**
  * ------------------------------------------------------------------
@@ -59,6 +61,9 @@ $router->get('/home', 'Welcome::index');
 $router->match('/auth/login', 'AuthController::login', ['GET', 'POST']);
 $router->match('/auth/register', 'AuthController::register', ['GET', 'POST']);
 $router->get('/auth/logout', 'AuthController::logout');
+// Debug endpoints (local development only)
+$router->get('/debug/session', 'DebugController::session');
+$router->match('/debug/echo', 'DebugController::echo', ['GET','POST']);
 // admin panel
 $router->get('/admin', 'AdminController::index');
 $router->get('/admin/messages_ajax', 'AdminController::messages_ajax');
@@ -75,6 +80,8 @@ $router->get('/admin/users/delete/{id}', 'AdminController::users_delete');
 // block/unblock user
 $router->get('/admin/users/block/{id}', 'AdminController::users_block');
 $router->get('/admin/bookings', 'AdminController::bookings');
+// admin audit logs
+$router->get('/admin/audit', 'AdminController::audit');
 $router->match('/admin/bookings/update/{id}', 'AdminController::bookings_update', ['GET', 'POST']);
 // alias routes (singular) kept for backward-compatibility or alternate URLs
 $router->get('/admin/booking', 'AdminController::bookings');

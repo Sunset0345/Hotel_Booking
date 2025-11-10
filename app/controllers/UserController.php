@@ -16,6 +16,14 @@ class UserController extends Controller {
             return;
         }
         $user = $this->session->userdata('user');
+        // load messages for embedding on the user dashboard so conversation is visible at /user
+        $this->call->model('MessagesModel');
+        try{
+            $stmt = $this->MessagesModel->raw('SELECT m.*, u.full_name FROM messages m LEFT JOIN users u ON u.user_id = m.user_id WHERE m.user_id = ? ORDER BY m.date_sent ASC', [intval($user['user_id'])]);
+            $conversation = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch(Exception $e){
+            $conversation = [];
+        }
         $rooms = $this->RoomsModel->All();
         // annotate rooms with booking state: available | pending | booked
         $today = date('Y-m-d');
@@ -50,12 +58,24 @@ class UserController extends Controller {
             unset($r);
         }
 
-        $this->call->view('user/index', ['user' => $user, 'rooms' => $rooms]);
+        $this->call->view('user/index', ['user' => $user, 'rooms' => $rooms, 'conversation' => $conversation]);
     }
 
     public function profile()
     {
-        if(!$this->session->has_userdata('user')){ redirect(site_url('auth/login')); return; }
+        if(!$this->session->has_userdata('user')){
+            // If this is an AJAX request, respond with JSON 401 instead of redirecting
+            try{
+                if($this->io->is_ajax()){
+                    header('Content-Type: application/json');
+                    http_response_code(401);
+                    echo json_encode(['status' => 'error', 'error' => 'unauthenticated', 'message' => 'Authentication required']);
+                    return;
+                }
+            } catch(Exception $e){ /* if io not available, fall back to redirect */ }
+            redirect(site_url('auth/login'));
+            return;
+        }
         $user = $this->session->userdata('user');
         $this->call->view('user/profile', ['user' => $user]);
     }
@@ -73,8 +93,35 @@ class UserController extends Controller {
 
     public function messages()
     {
-        if(!$this->session->has_userdata('user')){ redirect(site_url('auth/login')); return; }
+        // If not authenticated, return JSON 401 for AJAX callers to avoid an HTML redirect
+        if(!$this->session->has_userdata('user')){
+            try{
+                if($this->io->is_ajax()){
+                    header('Content-Type: application/json');
+                    http_response_code(401);
+                    echo json_encode(['status' => 'login_required', 'message' => 'Authentication required']);
+                    return;
+                }
+            } catch(Exception $e){ /* fallback to redirect if io not available */ }
+            redirect(site_url('auth/login')); return;
+        }
         $user = $this->session->userdata('user');
+        // Diagnostic logging for AJAX troubleshooting
+        try{
+            $projectRoot = dirname(__DIR__, 2);
+            $logDir = $projectRoot . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'logs';
+            if(!is_dir($logDir)) @mkdir($logDir, 0755, true);
+            $entry = "[".date('Y-m-d H:i:s')."] UserController::messages()\n";
+            $entry .= "REMOTE_ADDR: " . ($_SERVER['REMOTE_ADDR'] ?? 'cli') . "\n";
+            $entry .= "REQUEST_URI: " . ($_SERVER['REQUEST_URI'] ?? '') . "\n";
+            $entry .= "METHOD: " . ($this->io->method() ?? ($_SERVER['REQUEST_METHOD'] ?? 'unknown')) . "\n";
+            $entry .= "is_ajax: " . ($this->io->is_ajax() ? '1' : '0') . "\n";
+            $entry .= "session_user: " . ($this->session->has_userdata('user') ? $this->session->userdata('user')['user_id'] : 'none') . "\n";
+            $entry .= "GET: " . json_encode($_GET) . "\n";
+            $entry .= "POST: " . json_encode($_POST) . "\n";
+            $entry .= "COOKIES: " . json_encode($_COOKIE) . "\n\n";
+            @file_put_contents($logDir . DIRECTORY_SEPARATOR . 'user-messages-api.log', $entry, FILE_APPEND | LOCK_EX);
+        } catch(Exception $e) { /* ignore logging errors */ }
         // Quick DB connectivity check — return friendly error if DB is unavailable
         try{
             $this->MessagesModel->raw('SELECT 1');
@@ -108,8 +155,46 @@ class UserController extends Controller {
                 }
             }
         }
+        // Fetch full conversation for this user (both admin and user messages)
         $stmt = $this->MessagesModel->raw('SELECT m.*, u.full_name FROM messages m LEFT JOIN users u ON u.user_id = m.user_id WHERE m.user_id = ? ORDER BY m.date_sent ASC', [intval($user['user_id'])]);
         $conversation = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        // Instrumentation: log conversation size even for non-AJAX (page view) to diagnose empty UI
+        try {
+            $projectRoot = dirname(__DIR__, 2);
+            $logDir = $projectRoot . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'logs';
+            if(!is_dir($logDir)) @mkdir($logDir, 0755, true);
+            $snippet = [];
+            if(!empty($conversation)){
+                foreach(array_slice($conversation, 0, 3) as $c){
+                    $snippet[] = [
+                        'id' => $c['message_id'] ?? null,
+                        'from_admin' => $c['from_admin'] ?? null,
+                        'date_sent' => $c['date_sent'] ?? null,
+                        'message' => mb_substr($c['message'] ?? '', 0, 60)
+                    ];
+                }
+            }
+            $convLog  = "[".date('Y-m-d H:i:s')."] conversation_fetch user_id=".intval($user['user_id'])." count=".count($conversation)."\n";
+            $convLog .= 'snippet=' . json_encode($snippet) . "\n";
+            // If count is zero, do a quick sanity check to see if ANY rows exist in messages table for transparency
+            if(count($conversation) === 0){
+                try {
+                    $probe = $this->MessagesModel->raw('SELECT user_id, from_admin, message, date_sent FROM messages ORDER BY message_id DESC LIMIT 5');
+                    $probeRows = $probe->fetchAll(PDO::FETCH_ASSOC);
+                    $convLog .= 'probe_rows=' . json_encode($probeRows) . "\n";
+                } catch(Exception $ie) {
+                    $convLog .= 'probe_error=' . $ie->getMessage() . "\n";
+                }
+            }
+            @file_put_contents($logDir . DIRECTORY_SEPARATOR . 'user-messages-api.log', $convLog."\n", FILE_APPEND | LOCK_EX);
+        } catch(Exception $e) { /* ignore */ }
+
+        // If this is an AJAX GET (chat panel requesting conversation), mark admin->user messages as read
+        if ($this->io->is_ajax() && $this->io->method() === 'get') {
+            try{
+                $this->MessagesModel->raw('UPDATE messages SET is_read = 1 WHERE user_id = ? AND from_admin = 1', [intval($user['user_id'])]);
+            } catch(Exception $e){ /* ignore if column missing or update fails */ }
+        }
         // If this is an AJAX request, support JSON responses for the chat panel
         if($this->io->is_ajax() && $this->io->method() === 'get'){
             // If requesting weeks summary (history index)
@@ -141,8 +226,16 @@ class UserController extends Controller {
                         'count' => $cnt
                     ];
                 }
+                $resp = ['status' => 'ok', 'weeks' => $weeks];
+                // log response for debugging
+                try{
+                    $projectRoot = dirname(__DIR__, 2);
+                    $logDir = $projectRoot . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'logs';
+                    if(!is_dir($logDir)) @mkdir($logDir, 0755, true);
+                    @file_put_contents($logDir . DIRECTORY_SEPARATOR . 'user-messages-api.log', "[".date('Y-m-d H:i:s')."] response weeks\n" . json_encode($resp) . "\n\n", FILE_APPEND | LOCK_EX);
+                } catch(Exception $e) { }
                 header('Content-Type: application/json');
-                echo json_encode(['status' => 'ok', 'weeks' => $weeks]);
+                echo json_encode($resp);
                 return;
             }
 
@@ -159,14 +252,28 @@ class UserController extends Controller {
                 } catch(Exception $e){
                     $conversation = [];
                 }
+                $resp = ['status' => 'ok', 'conversation' => $conversation];
+                try{
+                    $projectRoot = dirname(__DIR__, 2);
+                    $logDir = $projectRoot . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'logs';
+                    if(!is_dir($logDir)) @mkdir($logDir, 0755, true);
+                    @file_put_contents($logDir . DIRECTORY_SEPARATOR . 'user-messages-api.log', "[".date('Y-m-d H:i:s')."] response week_conversation\n" . json_encode($resp) . "\n\n", FILE_APPEND | LOCK_EX);
+                } catch(Exception $e) { }
                 header('Content-Type: application/json');
-                echo json_encode(['status' => 'ok', 'conversation' => $conversation]);
+                echo json_encode($resp);
                 return;
             }
 
             // default: return entire conversation
+            $resp = ['status' => 'ok', 'conversation' => $conversation];
+            try{
+                $projectRoot = dirname(__DIR__, 2);
+                $logDir = $projectRoot . DIRECTORY_SEPARATOR . 'runtime' . DIRECTORY_SEPARATOR . 'logs';
+                if(!is_dir($logDir)) @mkdir($logDir, 0755, true);
+                @file_put_contents($logDir . DIRECTORY_SEPARATOR . 'user-messages-api.log', "[".date('Y-m-d H:i:s')."] response conversation\n" . json_encode($resp) . "\n\n", FILE_APPEND | LOCK_EX);
+            } catch(Exception $e) { }
             header('Content-Type: application/json');
-            echo json_encode(['status' => 'ok', 'conversation' => $conversation]);
+            echo json_encode($resp);
             return;
         }
 

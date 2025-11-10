@@ -1,256 +1,236 @@
 <?php defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed'); ?>
 <style>
-    /* Admin messages panel expand/collapse animation */
-    #admin-messages-root { display:flex; gap:12px; padding:12px; align-items:flex-start; }
-    #admin-messages-root aside { width:320px; transition: width 280ms ease, transform 280ms ease; }
-    #admin-messages-root section { flex:1; transition: width 280ms ease, transform 280ms ease; }
-    /* Expanded: aside shrinks to 25% and section grows to 75% */
-    #admin-messages-root.expanded aside { width:25%; min-width:220px; }
-    #admin-messages-root.expanded section { width:75%; flex:none; }
-    /* small visual for selected row */
-    #admin-user-list li.selected-user { box-shadow: inset 3px 0 0 0 rgba(41,149,255,0.18); }
-    /* Conversation message alignment */
-    .chat-msg { margin-bottom:12px; display:flex; flex-direction:column; }
-    .chat-msg.user { align-items:flex-start; }
-    .chat-msg.admin { align-items:flex-end; }
-    .chat-bubble { display:inline-block;padding:8px;border-radius:8px; max-width:78%; }
-    .chat-bubble.user { background: rgba(255,255,255,0.06); }
-    .chat-bubble.admin { background: rgba(11,116,222,0.12); }
+#msgs-wrapper { display:flex; gap:12px; padding:12px; height:calc(100vh - 200px); }
+#msgs-users { width:280px; background:rgba(255,255,255,0.03); border-radius:8px; padding:12px; overflow-y:auto; }
+#msgs-chat { flex:1; background:rgba(255,255,255,0.03); border-radius:8px; padding:12px; display:flex; flex-direction:column; }
+#msgs-header { font-weight:700; color:#2995ff; margin-bottom:12px; }
+#msgs-content { flex:1; overflow-y:auto; padding:12px; background:rgba(0,0,0,0.04); border-radius:6px; margin-bottom:12px; }
+.msgs-user-btn { width:100%; text-align:left; padding:10px; margin-bottom:6px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; cursor:pointer; font-size:0.95rem; }
+.msgs-user-btn:hover { background:rgba(255,255,255,0.08); }
+.msgs-user-btn.active { background:#2995ff; }
+.msg-bubble { margin-bottom:12px; padding:10px; border-radius:8px; max-width:80%; }
+.msg-bubble.user-msg { background:rgba(255,255,255,0.08); color:#fff; margin-right:auto; }
+.msg-bubble.admin-msg { background:linear-gradient(135deg,#2995ff,#1e6fd8); color:#fff; margin-left:auto; }
+.msg-meta { font-size:0.8rem; color:#999; margin-bottom:4px; }
+#msgs-form { display:flex; gap:8px; }
+#msgs-form input { flex:1; padding:10px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1); border-radius:6px; color:#fff; }
+#msgs-form input::placeholder { color:rgba(255,255,255,0.5); }
+#msgs-form button { padding:10px 16px; background:#2995ff; border:0; border-radius:6px; color:#fff; font-weight:600; cursor:pointer; }
+#msgs-form button:hover { background:#1e6fd8; }
+#msgs-form button:disabled { background:#666; cursor:not-allowed; }
 </style>
-<div id="admin-messages-root" style="display:flex;gap:12px;padding:12px">
-    <aside style="width:320px;background:rgba(255,255,255,0.04);padding:10px;border-radius:8px;">
-        <h3 style="margin-top:0">Users</h3>
-        <ul id="admin-user-list" style="list-style:none;padding:0;margin:0">
-            <?php if(empty($users)): ?>
-                <li style="padding:8px;color:#999">No users found.</li>
-            <?php else: ?>
-                <?php foreach($users as $u): ?>
-                    <li style="padding:8px;border-bottom:1px solid rgba(255,255,255,0.03);display:flex;justify-content:space-between;align-items:center">
-                        <a href="#" data-user-id="<?php echo $u['user_id']; ?>" style="color:#fff;text-decoration:none;display:block">
-                            <?php echo htmlspecialchars($u['full_name']); ?>
-                        </a>
-                        <?php if(isset($u['unread']) && intval($u['unread']) > 0): ?>
-                            <span style="background:#e53935;color:#fff;padding:4px 8px;border-radius:12px;font-size:0.8rem"><?php echo intval($u['unread']); ?></span>
-                        <?php endif; ?>
-                    </li>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </ul>
-    </aside>
-    <section style="flex:1;background:rgba(255,255,255,0.03);padding:12px;border-radius:8px;display:flex;flex-direction:column;gap:8px">
-        <div id="admin-selected-header" style="font-weight:700;font-size:1.1rem;margin-bottom:6px;color:#2995ff;min-height:24px">
-            <?php if(!empty($selected_user)): ?>
-                <?php $sel = null; foreach($users as $u){ if($u['user_id'] == $selected_user){ $sel = $u; break; } } ?>
-                <?php if($sel): ?>
-                    Conversation with <?php echo htmlspecialchars($sel['full_name']); ?>
-                <?php endif; ?>
-            <?php endif; ?>
-        </div>
-        <div id="admin-conversation-panel" style="flex:1;overflow:auto;padding:8px;border-radius:6px;background:rgba(0,0,0,0.04)">
-            <?php if(empty($conversation)): ?>
-                <div style="padding:18px;color:#999">Select a user to view conversation.</div>
-            <?php else: ?>
-                <?php foreach($conversation as $m): ?>
-                    <div style="margin-bottom:12px">
-                        <div style="font-weight:600;margin-bottom:6px"><?php echo htmlspecialchars($m['full_name']); ?> <small style="color:#666">— <?php echo htmlspecialchars($m['date_sent']); ?></small></div>
-                        <div style="background:<?php echo $m['from_admin'] ? 'rgba(11,116,222,0.12)' : 'rgba(255,255,255,0.06)'; ?>;display:inline-block;padding:8px;border-radius:8px;"><?php echo nl2br(htmlspecialchars($m['message'])); ?></div>
-                    </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
 
-        <form id="admin-message-form" method="post" style="display:flex;gap:8px">
-            <input type="hidden" name="user_id" id="admin-selected-user" value="<?php echo intval($selected_user); ?>" />
-            <input type="text" name="message" id="admin-message-input" placeholder="Type a message..." style="flex:1;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:#fff" disabled />
-            <button type="submit" id="admin-message-send" style="padding:8px 12px;border-radius:8px;border:0;background:#2995ff;color:#fff" disabled>Send</button>
+<div id="msgs-wrapper">
+  <div id="msgs-users">
+    <h3 style="margin-top:0; margin-bottom:12px;">Users</h3>
+    <div id="msgs-list"></div>
+  </div>
+  
+  <div id="msgs-chat">
+    <div id="msgs-header">Select a user</div>
+    <div id="msgs-content">Select a user from the list</div>
+    <form id="msgs-form" onsubmit="window.msgs_sendMessage(event)">
+      <input type="text" id="msgs-input" placeholder="Type message..." disabled />
+      <button type="submit" id="msgs-btn" disabled>Send</button>
     </form>
-    </section>
+  </div>
 </div>
-<div id="admin-debug" style="position:fixed;right:12px;bottom:12px;width:360px;height:180px;background:rgba(0,0,0,0.7);color:#0f0;overflow:auto;padding:8px;font-family:monospace;font-size:12px;border-radius:6px;z-index:9999;display:none"></div>
+
+<!-- DEBUG INFO START -->
+<!-- isset($users): <?php echo isset($users) ? 'true' : 'false'; ?> -->
+<!-- is_array($users): <?php echo (isset($users) && is_array($users)) ? 'true' : 'false'; ?> -->
+<!-- count($users): <?php echo (isset($users) && is_array($users)) ? count($users) : 'N/A'; ?> -->
+<!-- $users value: <?php echo isset($users) ? json_encode($users) : 'undefined'; ?> -->
+<!-- DEBUG INFO END -->
+
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    var userList = document.getElementById('admin-user-list');
-    var conversationPanel = document.getElementById('admin-conversation-panel');
-    var selectedUserInput = document.getElementById('admin-selected-user');
-    var messageForm = document.getElementById('admin-message-form');
-    var msgInput = document.getElementById('admin-message-input');
-    var msgSend = document.getElementById('admin-message-send');
+// DEBUG: Check what PHP passed to us
+// Check if $users was set and what it contains
+if (typeof console !== 'undefined') {
+  console.log('[PHP Debug] isset($users):', <?php echo isset($users) ? 'true' : 'false'; ?>);
+  console.log('[PHP Debug] is_array($users):', <?php echo (isset($users) && is_array($users)) ? 'true' : 'false'; ?>);
+  console.log('[PHP Debug] count($users):', <?php echo (isset($users) && is_array($users)) ? count($users) : -1; ?>);
+  console.log('[PHP Debug] gettype($users):', '<?php echo (isset($users) ? gettype($users) : 'not set'); ?>');
+  console.log('[PHP Debug] $users raw value:', <?php echo isset($users) ? json_encode($users) : 'undefined'; ?>);
+}
 
-    function setFormEnabled(enabled) {
-        msgInput.disabled = !enabled;
-        msgSend.disabled = !enabled;
-        if(!enabled) msgInput.value = '';
+window.msgs_state = {
+  selectedUserId: null,
+  users: <?php 
+    if (isset($users) && is_array($users) && count($users) > 0) {
+      echo json_encode($users);
+    } else {
+      echo '[]';
     }
-    setFormEnabled(!!selectedUserInput.value);
+  ?>,
+  ADMIN_NAME: '<?php echo isset($admin_name) ? addslashes($admin_name) : 'Admin'; ?>'
+};
+console.log('msgs_state.users:', window.msgs_state.users);
+console.log('Number of users:', (window.msgs_state.users || []).length);
 
-    function debugLog(msg){
-        try{ console.log(msg); }catch(e){}
-        var dbg = document.getElementById('admin-debug');
-        if(dbg){ dbg.style.display = 'block'; dbg.textContent += msg + '\n'; dbg.scrollTop = dbg.scrollHeight; }
-    }
+function msgs_escapeHtml(s) {
+  if (!s) return '';
+  return String(s).replace(/[&<>"]/g, function(c) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+  });
+}
 
-    function debugFetch(url, options){
-        options = options || {};
-        options.headers = options.headers || {};
-        if(!options.headers['X-Requested-With'] && !options.headers['x-requested-with']){
-            options.headers['X-Requested-With'] = 'XMLHttpRequest';
-        }
-        debugLog('[debugFetch] URL: ' + url + (options && options.method ? ' METHOD:' + options.method : ''));
-        var start = Date.now();
-        return fetch(url, options)
-            .then(function(resp){
-                var took = Date.now() - start;
-                var contentType = resp.headers.get('content-type') || '';
-                debugLog('[debugFetch] Status: ' + resp.status + ' (' + took + 'ms) content-type: ' + contentType);
-                return resp.text().then(function(text){
-                    debugLog('[debugFetch] Response length: ' + (text ? text.length : 0));
-                    return { status: resp.status, ok: resp.ok, text: text, contentType: contentType };
-                });
-            }).catch(function(err){
-                debugLog('[debugFetch] Error: ' + err);
-                throw err;
-            });
-    }
-    userList.addEventListener('click', function(e) {
-        var li = e.target.closest('li');
-        if(!li) return;
-        var anchor = li.querySelector('a[data-user-id]');
-        if(!anchor) return;
-        e.preventDefault();
-        var userId = anchor.dataset.userId;
-
-        // clear previous selection styles
-        Array.from(userList.querySelectorAll('li')).forEach(function(r){
-            r.classList.remove('selected-user');
-            r.style.background = '';
-        });
-        li.classList.add('selected-user');
-        li.style.background = 'rgba(41,149,255,0.06)';
-
-    selectedUserInput.value = userId;
-    setFormEnabled(true);
-    var root = document.getElementById('admin-messages-root'); if(root) root.classList.add('expanded');
-        var header = document.getElementById('admin-selected-header');
-        header.textContent = 'Conversation with ' + anchor.textContent.trim();
-        conversationPanel.innerHTML = '<div style="padding:18px;color:#999">Loading...</div>';
-
-    var ajaxUrl = '<?php echo (config_item("index_page") ? config_item("index_page")."/" : "") . "admin/messages_api"; ?>?user_id=' + encodeURIComponent(userId);
-        debugFetch(ajaxUrl).then(function(res){
-            try{
-                if(res.contentType && res.contentType.indexOf('application/json') === -1){ throw new Error('non-json'); }
-                var obj = JSON.parse(res.text);
-                if(obj && obj.conversation){
-                    conversationPanel.innerHTML = renderConversation(obj.conversation);
-                    
-                    conversationPanel.scrollTop = conversationPanel.scrollHeight;
-
-                    var badge = li.querySelector('span'); if(badge) badge.style.display = 'none';
-                    return;
-                }
-            }catch(e){ /* not JSON */ }
-            conversationPanel.innerHTML = res.text;
-            conversationPanel.scrollTop = conversationPanel.scrollHeight;
-            var badge2 = li.querySelector('span'); if(badge2) badge2.style.display = 'none';
-        }).catch(function(err){
-            conversationPanel.innerHTML = '<div style="padding:18px;color:#c00">Error loading conversation.</div>';
-        });
-        msgInput.value = '';
+function msgs_renderUsers() {
+  var html = '';
+  if (!window.msgs_state.users || !window.msgs_state.users.length) {
+    html = '<p style="color:#999">No users found</p>';
+  } else {
+    window.msgs_state.users.forEach(function(u) {
+      var safeName = msgs_escapeHtml(u.full_name);
+      html += '<button class="msgs-user-btn" data-user-id="' + u.user_id + '" data-user-name="' + safeName + '" style="position:relative">'
+        + safeName;
+      if (u.unread && parseInt(u.unread) > 0) {
+        html += '<span style="position:absolute; right:8px; top:50%; transform:translateY(-50%); background:#e53935; color:#fff; padding:2px 6px; border-radius:10px; font-size:0.7rem">' + u.unread + '</span>';
+      }
+      html += '</button>';
     });
+  }
+  var listEl = document.getElementById('msgs-list');
+  listEl.innerHTML = html;
 
-    messageForm.addEventListener('submit', function(e) {
-        e.preventDefault();
-        var userId = selectedUserInput.value;
-        var message = msgInput.value.trim();
-        if(!userId || !message) return;
-        msgSend.disabled = true;
-        var formData = new FormData();
-        formData.append('user_id', userId);
-        formData.append('message', message);
-        debugFetch('<?php echo (config_item("index_page") ? config_item("index_page")."/" : "") . "admin/messages"; ?>', { method: 'POST', body: formData, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-        .then(function(res){
-            var errorMsg = '';
-            if(res.contentType && res.contentType.indexOf('application/json') === -1){
-                errorMsg = '<div style="padding:14px;color:#c00;background:#fee;border-radius:8px;margin-bottom:8px">Server returned unexpected response. You may be logged out or there is a server error.</div>' + res.text;
-                conversationPanel.innerHTML = errorMsg;
-                msgSend.disabled = false;
-                return;
-            }
-            var obj = null;
-            try{ obj = JSON.parse(res.text); }catch(e){ obj = null; }
-            if(obj && obj.status === 'error'){
-                errorMsg = '<div style="padding:14px;color:#c00;background:#fee;border-radius:8px;margin-bottom:8px">'+(obj.msg ? obj.msg : 'Unable to send message.')+'</div>';
-                if(obj.detail){ errorMsg += '<pre style="background:#fff0f0;color:#c00;padding:8px;border-radius:6px">'+escapeHtml(obj.detail)+'</pre>'; }
-                conversationPanel.innerHTML = errorMsg;
-                msgSend.disabled = false;
-                return;
-            }
-            // Success: refresh conversation
-            var ajaxUrl2 = '<?php echo (config_item("index_page") ? config_item("index_page")."/" : "") . "admin/messages_api"; ?>?user_id=' + encodeURIComponent(userId);
-            debugFetch(ajaxUrl2).then(function(res2){
-                try{
-                    if(res2.contentType && res2.contentType.indexOf('application/json') === -1){ conversationPanel.innerHTML = res2.text; return; }
-                    var obj2 = JSON.parse(res2.text);
-                    if(obj2 && obj2.conversation){
-                        conversationPanel.innerHTML = renderConversation(obj2.conversation);
-                    } else {
-                        conversationPanel.innerHTML = res2.text;
-                    }
-                }catch(e){
-                    conversationPanel.innerHTML = res2.text;
-                }
-                msgInput.value = '';
-                msgSend.disabled = false;
-            });
-        })
-        .catch(function(err){
-            conversationPanel.innerHTML = '<div style="padding:14px;color:#c00;background:#fee;border-radius:8px;margin-bottom:8px">Error sending message: '+escapeHtml(err)+'</div>';
-            msgSend.disabled = false;
-        });
+  // Bind click handlers without inline JS to satisfy strict CSP (no unsafe-eval)
+  listEl.querySelectorAll('.msgs-user-btn').forEach(function(btn){
+    btn.addEventListener('click', function(e){
+      var id = parseInt(this.getAttribute('data-user-id'), 10);
+      var name = this.getAttribute('data-user-name') || 'User';
+      window.msgs_selectUser(id, name, e);
     });
-    // Polling: refresh conversation every 5 seconds when a user is selected
-    setInterval(function(){
-        var userId = selectedUserInput.value;
-        if(userId){
-            var ajaxUrl3 = '<?php echo (config_item("index_page") ? config_item("index_page")."/" : "") . "admin/messages_api"; ?>?user_id=' + encodeURIComponent(userId);
-            debugFetch(ajaxUrl3).then(function(res){
-                try{
-                    if(res.contentType && res.contentType.indexOf('application/json') === -1){ conversationPanel.innerHTML = res.text; return; }
-                    var obj = JSON.parse(res.text);
-                    if(obj && obj.conversation){ conversationPanel.innerHTML = renderConversation(obj.conversation); }
-                    else { conversationPanel.innerHTML = res.text; }
-                }catch(e){ conversationPanel.innerHTML = res.text; }
-            }).catch(function(){ /* ignore polling errors */ });
-        }
-    }, 5000);
+  });
+}
 
-    // adminName will be provided by server-side if available
-    var ADMIN_NAME = '<?php echo isset($admin_name) ? addslashes($admin_name) : 'Admin'; ?>';
-    function renderConversation(conv){
-        if(!conv || !conv.length) return '<div style="padding:18px;color:#999">No messages yet.</div>';
-        var html = '';
-        conv.forEach(function(m){
-            var isAdmin = parseInt(m.from_admin) === 1;
-            var name = isAdmin ? ADMIN_NAME : (m.full_name || 'User');
-            var date = m.date_sent || '';
-            var body = m.message || '';
-            var roleClass = isAdmin ? 'admin' : 'user';
-            html += '<div class="chat-msg '+roleClass+'">';
-            html += '<div style="font-weight:600;margin-bottom:6px">'+escapeHtml(name)+' <small style="color:#666">— '+escapeHtml(date)+'</small></div>';
-            html += '<div class="chat-bubble '+roleClass+'">'+nl2br(escapeHtml(body))+'</div>';
-            html += '</div>';
-        });
-        return html;
+window.msgs_selectUser = function(userId, userName, e) {
+  window.msgs_state.selectedUserId = userId;
+  
+  // Mark button as active
+  document.querySelectorAll('.msgs-user-btn').forEach(b => b.classList.remove('active'));
+  if (e && e.target) {
+    var btn = e.target.closest('button');
+    if (btn) btn.classList.add('active');
+  } else {
+    // Fallback when called programmatically: activate by data-user-id
+    var selBtn = document.querySelector('.msgs-user-btn[data-user-id="' + userId + '"]');
+    if (selBtn) selBtn.classList.add('active');
+  }
+  
+  // Update header and enable form
+  document.getElementById('msgs-header').textContent = 'Chat with ' + userName;
+  document.getElementById('msgs-input').disabled = false;
+  document.getElementById('msgs-btn').disabled = false;
+  
+  // Load conversation
+  document.getElementById('msgs-content').innerHTML = '<div style="padding:12px; color:#999">Loading...</div>';
+  
+  fetch('<?php echo site_url("admin/messages_api"); ?>?user_id=' + userId, {
+    method: 'GET',
+    credentials: 'same-origin',
+    headers: {'X-Requested-With': 'XMLHttpRequest'}
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.conversation) {
+      msgs_renderConversation(data.conversation);
+    } else {
+      document.getElementById('msgs-content').innerHTML = '<div style="padding:12px; color:#c00">Error loading messages</div>';
     }
+  })
+  .catch(e => {
+    document.getElementById('msgs-content').innerHTML = '<div style="padding:12px; color:#c00">Error: ' + msgs_escapeHtml(String(e)) + '</div>';
+  });
+};
 
-    function escapeHtml(str){
-        if(!str) return '';
-        return String(str).replace(/[&<>\"]/g, function(s){
-            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[s];
-        });
-    }
+function msgs_renderConversation(conv) {
+  var html = '';
+  if (!conv || !conv.length) {
+    html = '<div style="padding:12px; color:#999">No messages yet</div>';
+  } else {
+    conv.forEach(function(m) {
+      var isAdmin = parseInt(m.from_admin) === 1;
+      var name = isAdmin ? window.msgs_state.ADMIN_NAME : (m.full_name || 'User');
+      var cls = isAdmin ? 'admin-msg' : 'user-msg';
+      html += '<div class="msg-meta">' + msgs_escapeHtml(name) + ' — ' + msgs_escapeHtml(m.date_sent) + '</div>';
+      html += '<div class="msg-bubble ' + cls + '">' + msgs_escapeHtml(m.message).replace(/\n/g, '<br>') + '</div>';
+    });
+  }
+  var panel = document.getElementById('msgs-content');
+  panel.innerHTML = html;
+  panel.scrollTop = panel.scrollHeight;
+}
 
-    function nl2br(str){
-        return str.replace(/\r?\n/g, '<br/>');
+window.msgs_sendMessage = function(e) {
+  e.preventDefault();
+  var userId = window.msgs_state.selectedUserId;
+  var msg = document.getElementById('msgs-input').value.trim();
+  if (!userId || !msg) return;
+  
+  document.getElementById('msgs-btn').disabled = true;
+  var fd = new FormData();
+  fd.append('user_id', userId);
+  fd.append('message', msg);
+  
+  fetch('<?php echo site_url("admin/messages"); ?>', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: {'X-Requested-With': 'XMLHttpRequest'},
+    body: fd
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.status === 'ok' || !data.error) {
+      document.getElementById('msgs-input').value = '';
+      // Reload conversation
+      fetch('<?php echo site_url("admin/messages_api"); ?>?user_id=' + userId, {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+      })
+      .then(r => r.json())
+      .then(d => {
+        if (d.conversation) msgs_renderConversation(d.conversation);
+      });
     }
-});
+    document.getElementById('msgs-btn').disabled = false;
+  })
+  .catch(e => {
+    alert('Error sending message: ' + String(e));
+    document.getElementById('msgs-btn').disabled = false;
+  });
+};
+
+// Auto-refresh every 4 seconds
+setInterval(function() {
+  if (window.msgs_state.selectedUserId) {
+    fetch('<?php echo site_url("admin/messages_api"); ?>?user_id=' + window.msgs_state.selectedUserId, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(r => r.json())
+    .then(d => {
+      if (d.conversation) msgs_renderConversation(d.conversation);
+    })
+    .catch(e => {});
+  }
+}, 4000);
+
+// Initialize
+console.log('[msgs] Initializing...');
+console.log('[msgs] users array:', window.msgs_state.users);
+console.log('[msgs] users length:', (window.msgs_state.users || []).length);
+msgs_renderUsers();
+console.log('[msgs] msgs_renderUsers() called');
+// Auto-select first user if available
+if (window.msgs_state.users && window.msgs_state.users.length > 0) {
+  console.log('[msgs] Auto-selecting first user:', window.msgs_state.users[0]);
+  setTimeout(function() {
+    window.msgs_selectUser(window.msgs_state.users[0].user_id, window.msgs_state.users[0].full_name);
+  }, 200);
+} else {
+  console.log('[msgs] No users available to auto-select');
+}
+
 </script>

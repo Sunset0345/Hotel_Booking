@@ -86,9 +86,12 @@
     <div id="profileMenu" role="menu" aria-labelledby="profileBtn" style="position:absolute;right:0;top:calc(100% + 8px);background:#fff;color:#0b172a;border-radius:8px;box-shadow:0 8px 26px rgba(2,6,23,0.12);display:none;min-width:190px;overflow:hidden">
       <a role="menuitem" href="<?php echo site_url('user/profile'); ?>" style="display:block;padding:10px 14px;text-decoration:none;color:#0b172a;border-bottom:1px solid #f1f5f9">Profile</a>
       <a role="menuitem" href="<?php echo site_url('user/bookings'); ?>" style="display:block;padding:10px 14px;text-decoration:none;color:#0b172a;border-bottom:1px solid #f1f5f9">Bookings</a>
-  <a id="profileMessagesLink" role="menuitem" href="<?php echo site_url('user/messages'); ?>" style="display:block;padding:10px 14px;text-decoration:none;color:#0b172a;border-bottom:1px solid #f1f5f9">Messages</a>
+  <a id="profileMessagesLink" role="menuitem" href="#" style="display:block;padding:10px 14px;text-decoration:none;color:#0b172a;border-bottom:1px solid #f1f5f9">Messages</a>
       <a role="menuitem" href="<?php echo site_url('auth/logout'); ?>" style="display:block;padding:10px 14px;text-decoration:none;color:#b91c1c">Logout</a>
     </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+  <!-- Debug button removed -->
   </div>
 </div>
 
@@ -166,9 +169,9 @@
     .chat-panel .chat-header{ padding:12px 14px; border-bottom:1px solid #eee; display:flex; align-items:center; justify-content:space-between; }
     .chat-panel .chat-messages{ padding:12px; overflow:auto; flex:1 1 auto; background:#f7fafc; }
     .chat-panel .chat-input{ padding:10px; border-top:1px solid #eee; display:flex; gap:8px; }
-    .chat-panel .bubble{ display:inline-block; padding:8px 12px; border-radius:12px; max-width:80%; margin-bottom:8px; }
-    .bubble.me{ background:#d1e7dd; align-self:flex-end; }
-    .bubble.them{ background:#eef2ff; align-self:flex-start; }
+  .chat-panel .bubble{ display:inline-block; padding:8px 12px; border-radius:12px; max-width:80%; margin-bottom:8px; color: #0b172a; }
+  .bubble.me{ background:#d1e7dd; align-self:flex-end; }
+  .bubble.them{ background:#eef2ff; align-self:flex-start; }
     /* Enhanced booking panel with animations */
     .booking-overlay{ position:fixed; inset:0; z-index:155; opacity:0; pointer-events:none; transition:opacity .32s ease; }
     .booking-overlay.show{ opacity:1; pointer-events:auto; }
@@ -248,7 +251,7 @@
       </div>
     </div>
     <div id="chatMessages" class="chat-messages" aria-live="polite"></div>
-  <form id="chatForm" class="chat-input" method="post" action="<?php echo base_url('user/messages'); ?>">
+  <form id="chatForm" class="chat-input" method="post" action="<?php echo site_url('user/messages'); ?>">
       <input id="chatInput" name="message" type="text" placeholder="Write a message..." style="flex:1;padding:8px;border-radius:8px;border:1px solid #e5e7eb;" autocomplete="off" />
       <button id="chatSend" type="submit" style="padding:8px 12px;border-radius:8px;border:0;background:#0b74de;color:#fff">Send</button>
     </form>
@@ -335,9 +338,17 @@
         var chatClose = document.getElementById('chatClose');
 
         function renderConversation(arr){
+          // Preserve any pending (optimistic) bubbles so they aren't removed by the poll-render cycle
+          var pendingBubbles = Array.prototype.slice.call(chatMessages.querySelectorAll('.bubble.pending')).map(function(b){ return b.parentNode; }).filter(Boolean);
+          // dedupe
+          var pendingUnique = [];
+          pendingBubbles.forEach(function(w){ if(pendingUnique.indexOf(w) === -1) pendingUnique.push(w); });
+
           chatMessages.innerHTML = '';
           if(!arr || !arr.length){
             chatMessages.innerHTML = '<div style="padding:18px;color:#666">No messages yet. Start a conversation with admin.</div>';
+            // re-append pending wrappers (if any)
+            pendingUnique.forEach(function(w){ chatMessages.appendChild(w); });
             chatMessages.scrollTop = chatMessages.scrollHeight;
             return;
           }
@@ -349,7 +360,7 @@
             bubble.className = 'bubble ' + (m.from_admin ? 'them' : 'me');
             bubble.innerHTML = escapeHtml(m.message).replace(/\n/g, '<br>');
             var meta = document.createElement('div');
-            meta.style.fontSize = '0.75rem'; meta.style.color = '#666'; meta.style.marginTop = '6px';
+            meta.style.fontSize = '0.75rem'; meta.style.color = '#0b172a'; meta.style.marginTop = '6px';
             meta.textContent = (m.from_admin ? 'Admin' : (m.full_name || 'You')) + ' — ' + (m.date_sent || '');
             d.appendChild(bubble);
             d.appendChild(meta);
@@ -357,20 +368,122 @@
             bubble.style.alignSelf = m.from_admin ? 'flex-start' : 'flex-end';
             chatMessages.appendChild(d);
           });
+          // re-append any pending optimistic items so they remain visible until send succeeds/fails
+          pendingUnique.forEach(function(w){ chatMessages.appendChild(w); });
           chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // If the server embedded an initial conversation (dashboard embedding), render it immediately
+        try {
+          var __initialConversation = <?php echo json_encode(isset($conversation) ? $conversation : []); ?>;
+          console.debug && console.debug('initialConversation', __initialConversation);
+          if(__initialConversation && __initialConversation.length){ renderConversation(__initialConversation); window.__initialConversationRendered = true; }
+        } catch(e){ console.warn && console.warn('initialConversation parse failed', e); }
+
+  var chatPollInterval = null;
+  // Toggle to force GET requests to hit debug echo endpoint for inspection
+  // Set to false to use the real /user/messages endpoint
+  // Debug mode removed; always hit real endpoints
+
+        var __authHandled = false;
+        function handleHtmlAuthResponse(txt){
+          // Prevent repeated handling
+          if(__authHandled) return;
+          __authHandled = true;
+          console.debug && console.debug('handleHtmlAuthResponse: non-JSON response', txt && txt.slice ? txt.slice(0,400) : txt);
+          // Non-JSON response (likely redirect HTML). Show a small non-blocking banner above messages and keep existing conversation visible.
+          try{
+            var banner = document.createElement('div');
+            banner.style.padding = '10px';
+            banner.style.background = '#fff3f0';
+            banner.style.border = '1px solid #fee2e2';
+            banner.style.color = '#7f1d1d';
+            banner.style.borderRadius = '8px';
+            banner.style.margin = '8px';
+            banner.style.display = 'flex';
+            banner.style.justifyContent = 'space-between';
+            banner.style.alignItems = 'center';
+            // Try to detect if the HTML looks like a login page (common case when session expired)
+            var looksLikeLogin = false;
+            try{
+              var lower = (txt || '').toLowerCase();
+              if(lower.indexOf('<form') !== -1 && (lower.indexOf('login') !== -1 || lower.indexOf('sign in') !== -1 || lower.indexOf('password') !== -1)) looksLikeLogin = true;
+            } catch(e){}
+            if(looksLikeLogin){
+              banner.innerHTML = '<span>Your session may have expired. Please log in to continue.</span>';
+            } else {
+              banner.innerHTML = '<span>Unable to load messages right now.</span>';
+            }
+            // mark banner so it can be removed once a successful JSON response arrives
+            banner.setAttribute('data-auth-banner','1');
+            var rbtn = document.createElement('button');
+            rbtn.textContent = looksLikeLogin ? 'Login' : 'Retry';
+            rbtn.style.marginLeft = '12px';
+            rbtn.style.padding = '6px 10px';
+            rbtn.style.borderRadius = '6px';
+            rbtn.style.border = '0';
+            rbtn.style.background = '#0b74de';
+            rbtn.style.color = '#fff';
+            if(looksLikeLogin){
+              rbtn.addEventListener('click', function(){ window.location.href = '<?php echo site_url('auth/login'); ?>'; });
+            } else {
+              rbtn.addEventListener('click', function(){ __authHandled = false; fetchConversation(); });
+            }
+            banner.appendChild(rbtn);
+            // insert banner at top of chatMessages but preserve existing messages
+            if(chatMessages.firstChild){ chatMessages.insertBefore(banner, chatMessages.firstChild); } else { chatMessages.appendChild(banner); }
+          } catch(e){
+            // fallback: do nothing that would remove conversation
+            console.warn && console.warn('banner create failed', e);
+          }
+          // keep polling paused to avoid noisy failures; user can retry manually
+          if(chatPollInterval){ clearInterval(chatPollInterval); chatPollInterval = null; }
+        }
+
+        function removeAuthBanner(){
+          try{
+            var existing = chatMessages.querySelector('[data-auth-banner="1"]');
+            if(existing && existing.parentNode){ existing.parentNode.removeChild(existing); }
+          } catch(e){ /* noop */ }
+        }
+
+    function fetchConversation(){
+          // fetch the full conversation and update the panel (used by polling)
+  fetch('<?php echo site_url('user/messages'); ?>', { method: 'GET', credentials: 'same-origin', headers: { 'X-Requested-With':'XMLHttpRequest', 'Accept':'application/json' } })
+    .then(function(r){ var ct = (r.headers.get('content-type')||''); console.debug && console.debug('fetchConversation response', r.status, ct); if(ct.indexOf('application/json') !== -1){ return r.json().then(function(j){ return {ok:true, json:j}; }); } return r.text().then(function(t){ return {ok:false, text:t, status:r.status}; }); })
+    .then(function(res){ if(res.ok){ var j = res.json; if(j && j.status === 'ok'){ // remove any previous auth banner and resume polling
+                removeAuthBanner(); __authHandled = false; renderConversation(j.conversation || []);
+                // ensure polling is running when the panel is open
+                if(chatPanel.classList.contains('open') && !chatPollInterval){ chatPollInterval = setInterval(fetchConversation, 5000); }
+              } else { console.warn('Unexpected JSON', j); renderConversation([]); } } else { console.warn('Non-JSON response for conversation', res.status, res.text); handleHtmlAuthResponse(res.text || ''); } })
+    .catch(function(err){ console.error('Polling fetch error', err); });
         }
 
         function openChat(){
           chatPanel.classList.add('open'); chatPanel.setAttribute('aria-hidden','false');
           chatOverlay.classList.add('show'); chatOverlay.setAttribute('aria-hidden','false');
-              // fetch conversation via AJAX GET (default: full conversation)
-              fetch('<?php echo base_url('user/messages'); ?>', { method: 'GET', credentials: 'same-origin', headers: { 'X-Requested-With':'XMLHttpRequest' } })
-                .then(function(r){ return r.json(); })
-                .then(function(j){ if(j && j.status === 'ok'){ renderConversation(j.conversation || []); } else { renderConversation([]); } })
-                .catch(function(err){ console.error('chat load error',err); renderConversation([]); });
+          // If we already rendered an embedded conversation on the dashboard, skip the initial network fetch
+          if(window.__initialConversationRendered){
+            console.debug && console.debug('openChat: using embedded conversation, skipping initial fetch');
+          } else {
+            // initial fetch
+            fetch('<?php echo site_url('user/messages'); ?>', { method: 'GET', credentials: 'same-origin', headers: { 'X-Requested-With':'XMLHttpRequest', 'Accept':'application/json' } })
+              .then(function(r){ var ct = (r.headers.get('content-type')||''); console.debug && console.debug('openChat initial load', r.status, ct); if(ct.indexOf('application/json') !== -1){ return r.json().then(function(j){ return {ok:true, json:j}; }); } return r.text().then(function(t){ return {ok:false, text:t, status:r.status}; }); })
+              .then(function(res){ if(res.ok){ var j = res.json; if(j && j.status === 'ok'){ // remove auth banner if previously shown and render
+                    removeAuthBanner(); __authHandled = false; renderConversation(j.conversation || []);
+                  } else { console.warn('Unexpected JSON on initial load', j); renderConversation([]); } } else { console.warn('Non-JSON initial load', res.status, res.text); handleHtmlAuthResponse(res.text || ''); } })
+              .catch(function(err){ console.error('chat load error',err); renderConversation([]); });
+          }
+
+          // start polling for new messages every 5 seconds
+          if(chatPollInterval) { clearInterval(chatPollInterval); }
+          chatPollInterval = setInterval(fetchConversation, 5000);
         }
 
-        function closeChat(){ chatPanel.classList.remove('open'); chatPanel.setAttribute('aria-hidden','true'); chatOverlay.classList.remove('show'); chatOverlay.setAttribute('aria-hidden','true'); }
+        function closeChat(){
+          chatPanel.classList.remove('open'); chatPanel.setAttribute('aria-hidden','true'); chatOverlay.classList.remove('show'); chatOverlay.setAttribute('aria-hidden','true');
+          if(chatPollInterval){ clearInterval(chatPollInterval); chatPollInterval = null; }
+        }
 
         if(profileMessagesLink){
           profileMessagesLink.addEventListener('click', function(e){ e.preventDefault(); openChat(); });
@@ -379,15 +492,11 @@
         var chatHistoryBtn = document.getElementById('chatHistory');
         function showWeeks(){
           chatMessages.innerHTML = '<div style="padding:12px;color:#666">Loading history&hellip;</div>';
-          fetch('<?php echo base_url('user/messages'); ?>?weeks=1', { method: 'GET', credentials: 'same-origin', headers: { 'X-Requested-With':'XMLHttpRequest' } })
-              .then(function(r){ return r.text(); })
-              .then(function(txt){
-                try{
-                  var j = JSON.parse(txt);
-                }catch(err){
-                  chatMessages.innerHTML = '<div style="padding:12px;color:#c00">Unable to load history — server returned unexpected response:<pre style="white-space:pre-wrap;color:#fff;background:#111;padding:8px;border-radius:6px;margin-top:8px">'+escapeHtml(txt)+'</pre></div>';
-                  return;
-                }
+          fetch('<?php echo site_url('user/messages'); ?>?weeks=1', { method: 'GET', credentials: 'same-origin', headers: { 'X-Requested-With':'XMLHttpRequest', 'Accept':'application/json' } })
+              .then(function(r){ var ct = (r.headers.get('content-type')||''); if(ct.indexOf('application/json') !== -1){ return r.json().then(function(j){ return {ok:true, json:j}; }); } return r.text().then(function(t){ return {ok:false, text:t, status:r.status}; }); })
+              .then(function(res){
+                if(!res.ok){ handleHtmlAuthResponse(res.text || ''); return; }
+                var j = res.json;
                 if(!j || j.status !== 'ok' || !j.weeks) { chatMessages.innerHTML = '<div style="padding:12px;color:#666">Unable to load history.</div>'; return; }
                 var html = '<div style="padding:8px;">';
                 html += '<div style="font-weight:700;margin-bottom:8px">Select week</div>';
@@ -397,12 +506,9 @@
                 // attach handlers
                 Array.prototype.slice.call(chatMessages.querySelectorAll('button[data-start]')).forEach(function(b){ b.addEventListener('click', function(){ var s = this.getAttribute('data-start'); // fetch conversation for that week
                     chatMessages.innerHTML = '<div style="padding:12px;color:#666">Loading messages for '+s+'&hellip;</div>';
-                    fetch('<?php echo base_url('user/messages'); ?>?week_start='+encodeURIComponent(s), { method: 'GET', credentials: 'same-origin', headers: { 'X-Requested-With':'XMLHttpRequest' } })
-                      .then(function(r){ return r.text(); })
-                      .then(function(t){
-                        try{ var res = JSON.parse(t); } catch(e){ chatMessages.innerHTML = '<div style="padding:12px;color:#c00">Unable to load messages — server returned unexpected response:<pre style="white-space:pre-wrap;color:#fff;background:#111;padding:8px;border-radius:6px;margin-top:8px">'+escapeHtml(t)+'</pre></div>'; return; }
-                        if(res && res.status === 'ok'){ renderConversation(res.conversation || []); } else { chatMessages.innerHTML = '<div style="padding:12px;color:#666">No messages for this week.</div>'; }
-                      })
+                    fetch('<?php echo site_url('user/messages'); ?>?week_start='+encodeURIComponent(s), { method: 'GET', credentials: 'same-origin', headers: { 'X-Requested-With':'XMLHttpRequest', 'Accept':'application/json' } })
+                      .then(function(r){ var ct = (r.headers.get('content-type')||''); if(ct.indexOf('application/json') !== -1){ return r.json().then(function(j){ return {ok:true, json:j}; }); } return r.text().then(function(t){ return {ok:false, text:t, status:r.status}; }); })
+                      .then(function(res){ if(!res.ok){ handleHtmlAuthResponse(res.text || ''); return; } var resp = res.json; if(resp && resp.status === 'ok'){ renderConversation(resp.conversation || []); } else { chatMessages.innerHTML = '<div style="padding:12px;color:#666">No messages for this week.</div>'; } })
                       .catch(function(){ chatMessages.innerHTML = '<div style="padding:12px;color:#666">Unable to load messages.</div>'; });
                   }); });
               }).catch(function(err){ chatMessages.innerHTML = '<div style="padding:12px;color:#666">Unable to load history.</div>'; });
@@ -413,25 +519,108 @@
         document.addEventListener('keydown', function(e){ if(e.key === 'Escape') closeChat(); });
 
         // chat send handler (AJAX POST) - reuse /user/messages endpoint which returns JSON for AJAX POST
-        chatForm.addEventListener('submit', function(e){
-          e.preventDefault();
-          var val = chatInput.value.trim(); if(!val) return; chatSend.disabled = true; chatSend.style.opacity = '0.6';
-          var data = new FormData(); data.append('message', val);
-          fetch(chatForm.getAttribute('action'), { method: 'POST', credentials: 'same-origin', body: data, headers: { 'X-Requested-With':'XMLHttpRequest' } })
-            .then(function(r){ return r.json(); })
-            .then(function(json){ if(json && json.status === 'ok'){ // append message
-                // server returns date_sent
-                var m = { from_admin:0, message: json.message, date_sent: json.date_sent, full_name: '<?php echo htmlspecialchars($user['full_name'], ENT_QUOTES); ?>' };
-                renderConversation((function(){ var nodes = chatMessages.querySelectorAll('.bubble'); var arr = []; try{ /* preserve existing appended items by reading DOM? simpler: just append new */ }catch(e){} return []; })());
-                // simple append
-                var wrapper = document.createElement('div'); wrapper.style.display='flex'; wrapper.style.flexDirection='column';
-                var bubble = document.createElement('div'); bubble.className='bubble me'; bubble.innerHTML = escapeHtml(m.message).replace(/\n/g,'<br>'); bubble.style.alignSelf='flex-end';
-                var meta = document.createElement('div'); meta.style.fontSize='0.75rem'; meta.style.color='#666'; meta.style.marginTop='6px'; meta.textContent = (m.full_name || 'You') + ' — ' + (m.date_sent || '');
-                wrapper.appendChild(bubble); wrapper.appendChild(meta); chatMessages.appendChild(wrapper); chatMessages.scrollTop = chatMessages.scrollHeight; chatInput.value='';
-              } else { alert('Unable to send message'); } })
-            .catch(function(err){ console.error(err); alert('Unable to send message'); })
-            .finally(function(){ chatSend.disabled = false; chatSend.style.opacity=''; });
-        });
+        // chat send with optimistic UI, retry support and better error handling
+        (function(){
+          var lastSend = null; // { text: string, pendingEl: HTMLElement }
+          // helper: safe FormData => array serializer (handles older browsers without entries()/Array.from)
+          function serializeFormData(fd){
+            var out = [];
+            try{
+              if(typeof fd.entries === 'function'){
+                var it = fd.entries();
+                var step;
+                // iterator-friendly loop
+                while(!(step = it.next()).done){ out.push([step.value[0], step.value[1]]); }
+                return out;
+              }
+            } catch(e){}
+            try{
+              if(typeof fd.forEach === 'function'){
+                fd.forEach(function(v,k){ out.push([k,v]); });
+                return out;
+              }
+            } catch(e){}
+            return out;
+          }
+          function createPendingBubble(text){
+            var wrapper = document.createElement('div'); wrapper.style.display='flex'; wrapper.style.flexDirection='column'; wrapper.style.opacity = '0.9';
+            var bubble = document.createElement('div'); bubble.className='bubble me pending'; bubble.innerHTML = escapeHtml(text).replace(/\n/g,'<br>'); bubble.style.alignSelf='flex-end'; bubble.style.opacity = '0.85';
+            var meta = document.createElement('div'); meta.style.fontSize='0.75rem'; meta.style.color='#0b172a'; meta.style.marginTop='6px'; meta.textContent = 'Sending';
+            wrapper.appendChild(bubble); wrapper.appendChild(meta);
+            chatMessages.appendChild(wrapper);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            return { wrapper: wrapper, bubble: bubble, meta: meta };
+          }
+
+          function markPendingFailed(pending){
+            if(!pending) return;
+            pending.bubble.style.opacity = '0.6';
+            pending.meta.textContent = 'Failed to send';
+            var retryBtn = document.createElement('button'); retryBtn.textContent = 'Retry'; retryBtn.style.marginLeft='8px'; retryBtn.style.padding='4px 8px'; retryBtn.style.border='0'; retryBtn.style.borderRadius='6px'; retryBtn.style.background='#0b74de'; retryBtn.style.color='#fff';
+            retryBtn.addEventListener('click', function(){ if(lastSend) doSend(lastSend.text, pending); });
+            pending.meta.appendChild(retryBtn);
+          }
+
+          function doSend(text, pending){
+            console.debug && console.debug('sending message', text);
+            var data = new FormData(); data.append('message', text);
+            // Diagnostic: log outgoing form content and available cookies (note: HttpOnly cookies won't be visible)
+            try{ console.debug && console.debug('send request', { url: chatForm.getAttribute('action'), form: serializeFormData(data), cookies: document.cookie }); } catch(e){}
+
+            fetch(chatForm.getAttribute('action'), { method: 'POST', credentials: 'same-origin', body: data, headers: { 'X-Requested-With':'XMLHttpRequest', 'Accept':'application/json' } })
+              .then(function(r){
+                // Log raw response text for debugging (clone so we can still parse later)
+                try{
+                  r.clone().text().then(function(raw){
+                    try{ console.debug && console.debug('raw-send-response', { status: r.status, contentType: r.headers.get('content-type'), raw: (raw && raw.slice) ? raw.slice(0,8000) : raw }); } catch(e){}
+                  }).catch(function(){});
+                } catch(e){}
+                var ct = (r.headers.get('content-type')||'');
+                console.debug && console.debug('send response', r.status, ct);
+                if(ct.indexOf('application/json') !== -1){
+                  return r.json().then(function(j){ return {ok:true, json:j}; });
+                }
+                return r.text().then(function(t){ return {ok:false, text:t, status:r.status}; });
+              })
+              .then(function(res){
+                if(!res.ok){
+                  // Non-JSON or auth redirect
+                  handleHtmlAuthResponse(res.text || '');
+                  markPendingFailed(pending);
+                  return;
+                }
+                var json = res.json;
+                if(json && json.status === 'ok'){
+                  // update pending bubble meta with final date
+                  if(pending && pending.meta){ pending.meta.textContent = '<?php echo htmlspecialchars($user['full_name'], ENT_QUOTES); ?>' + ' — ' + (json.date_sent || ''); }
+                  // mark as sent
+                  if(pending && pending.bubble){ pending.bubble.classList.remove('pending'); pending.bubble.style.opacity = ''; }
+                } else {
+                  // if server returned JSON but not ok, log it
+                  console.warn && console.warn('unexpected send JSON', json);
+                  markPendingFailed(pending);
+                }
+              })
+              .catch(function(err){ console.error('send error', err); markPendingFailed(pending); });
+          }
+
+          chatForm.addEventListener('submit', function(e){
+            e.preventDefault();
+            var val = chatInput.value.trim(); if(!val) return;
+            // ensure chatSend reference exists (some browsers don't expose id->global variable reliably)
+            var chatSend = chatSend || document.getElementById('chatSend');
+            try{ if(chatSend){ chatSend.disabled = true; chatSend.style.opacity = '0.6'; } } catch(e){}
+            // create optimistic pending UI
+            var pending = createPendingBubble(val);
+            lastSend = { text: val, pendingEl: pending };
+            // clear input immediately
+            chatInput.value = '';
+            // perform send
+            doSend(val, pending);
+            // restore send button
+            setTimeout(function(){ try{ if(chatSend){ chatSend.disabled = false; chatSend.style.opacity = ''; } }catch(e){} }, 700);
+          });
+        })();
 
         // Booking panel handlers
         var bookingOverlay = document.getElementById('bookingOverlay');
@@ -466,7 +655,7 @@
           bookingInner.innerHTML = '<div style="padding:24px;text-align:center;color:rgba(255,255,255,0.7)"><div class="loading-spinner"></div>Loading booking form...</div>';
           
           // Fetch booking form content
-          fetch(url, { method: 'GET', credentials: 'same-origin', headers: { 'X-Requested-With':'XMLHttpRequest' } })
+          fetch(url, { method: 'GET', credentials: 'same-origin', headers: { 'X-Requested-With':'XMLHttpRequest', 'Accept':'application/json' } })
             .then(function(r){ return r.json(); })
             .then(function(json){
               if(!json || json.status !== 'ok' || !json.html){ bookingInner.innerHTML = '<div style="padding:12px;color:#c00">Unable to load booking form.</div>'; return; }
@@ -479,7 +668,7 @@
                   var submitBtn = form.querySelector('button[type="submit"]');
                   if(submitBtn) { submitBtn.disabled = true; submitBtn.style.opacity = '0.6'; }
                   var fd = new FormData(form);
-                  fetch(form.getAttribute('action'), { method: 'POST', credentials: 'same-origin', body: fd, headers: { 'X-Requested-With':'XMLHttpRequest' } })
+                  fetch(form.getAttribute('action'), { method: 'POST', credentials: 'same-origin', body: fd, headers: { 'X-Requested-With':'XMLHttpRequest', 'Accept':'application/json' } })
                     .then(function(r){ return r.json(); })
                     .then(function(resp){
                       if(!resp){ bookingInner.innerHTML = '<div style="padding:12px;background:#fee2e2;color:#7f1d1d;border-radius:8px">Unexpected server response</div>'; return; }
@@ -687,6 +876,15 @@
         }
       });
     })();
+
+    // Repair any stray null characters inserted into pending meta text (defensive fix for older clients)
+    document.addEventListener('DOMContentLoaded', function(){
+      try{
+        var NUL = String.fromCharCode(0);
+        var nodes = document.querySelectorAll('#chatMessages div');
+        nodes.forEach(function(n){ if(n && n.textContent && n.textContent.indexOf(NUL) !== -1){ n.textContent = n.textContent.split(NUL).join('…'); } });
+      } catch(e){ /* noop */ }
+    });
   </script>
 
   </body>

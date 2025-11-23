@@ -1,3 +1,4 @@
+
 <?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 /**
@@ -299,6 +300,23 @@ $config['csrf_expire']             = 7200;
 $config['csrf_regenerate']         = FALSE;
 ?>
 <?php
+/*
+|-------------------------------------------------------------------
+| SMTP / Email settings (used by Email library fallback)
+|-------------------------------------------------------------------
+| Set `smtp_enabled` to TRUE and configure your SMTP server details
+| if PHP `mail()` is not available or you prefer using SMTP.
+*/
+$config['smtp_enabled'] = TRUE;
+$config['smtp_host'] = 'smtp.gmail.com';
+$config['smtp_port'] = 587;
+$config['smtp_user'] = '';
+$config['smtp_pass'] = '';
+$config['smtp_secure'] = 'tls'; // 'tls' or 'ssl'
+$config['smtp_from'] = 'no-reply@example.com';
+$config['smtp_from_name'] = 'Blue Lagoon Hotel';
+?>
+<?php
 defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 /**
  * ------------------------------------------------------------------
@@ -335,7 +353,10 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
  */
 
 /*
-| -------------------------------------------------------------------
+
+// 
+
+--------------------------------------------------------------
 |  Config Files
 | -------------------------------------------------------------------
 | This file is for setting-up default settings.
@@ -536,8 +557,14 @@ $config['cookie_expiration']       = 86400;
 $config['cookie_httponly']         = FALSE;
 $config['cookie_samesite']         = 'Lax';
 
+//smtp settings
+$config['smtp_host'] = 'smtp.gmail.com';
+$config['smtp_user'] = 'jamesbacsa2345@gmail.com';
+$config['smtp_pass'] = 'dmqi ibtt emld etux';
+$config['smtp_port'] = 587;
+$config['smtp_crypto'] = 'tls';
 /*
-|--------------------------------------------------------------------------
+|----------------------------------x`----------------------------------------
 | Cache
 |--------------------------------------------------------------------------
 |

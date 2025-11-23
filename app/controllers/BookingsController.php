@@ -44,6 +44,13 @@ class BookingsController extends Controller {
             return;
         }
 
+        // Require user verification before allowing booking
+        $isVerified = is_array($user) && !empty($user['is_verified']) ? intval($user['is_verified']) : 0;
+        if(!$isVerified){
+            if ($this->io->is_ajax()){ header('Content-Type: application/json'); http_response_code(403); echo json_encode(['status'=>'forbidden','message'=>'You must complete identity verification before creating bookings. Please upload your address, a valid ID and a selfie on your profile.']); return; }
+            flash_set('error', 'You must complete identity verification before creating bookings. Please upload your address, a valid ID and a selfie on your profile.'); redirect('user/profile'); return;
+        }
+
         $check_in  = $this->io->post('check_in');
         $check_out = $this->io->post('check_out');
 
@@ -127,6 +134,32 @@ class BookingsController extends Controller {
         }
 
         $updated = $this->BookingsModel->update_status($booking_id, $status);
+
+        // Send invoice if approved
+        if ($updated && $status === 'approved') {
+            // Get booking details with user and room info
+            $booking = $this->db->table('bookings b')
+                ->select('b.*, u.email, u.full_name, r.room_number, r.price_per_night')
+                ->join('users u', 'b.user_id = u.user_id')
+                ->join('rooms r', 'b.room_id = r.room_id')
+                ->where('b.booking_id', $booking_id)
+                ->get();
+            if ($booking && isset($booking['email'])) {
+                $to = $booking['email'];
+                $subject = 'Your Booking Invoice - Blue Lagoon Hotel';
+                $message = "Hello {$booking['full_name']},<br><br>"
+                    . "Your booking for Room {$booking['room_number']} has been approved.<br>"
+                    . "Check-in: {$booking['check_in']}<br>"
+                    . "Check-out: {$booking['check_out']}<br>"
+                    . "Total Amount: <b>₱{$booking['total_amount']}</b><br><br>"
+                    . "Thank you for booking with Blue Lagoon Hotel!<br>"
+                    . "<hr>";
+                $this->call->email->to($to);
+                $this->call->email->subject($subject);
+                $this->call->email->message($message);
+                $this->call->email->send();
+            }
+        }
 
         if ($updated) {
             echo json_encode(['status' => 'ok', 'action' => 'updated', 'new_status' => $status]);

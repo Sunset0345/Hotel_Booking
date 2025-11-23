@@ -7,13 +7,22 @@ CREATE TABLE IF NOT EXISTS users (
     full_name VARCHAR(100) NOT NULL,
     email VARCHAR(100) UNIQUE NOT NULL,
     password VARCHAR(255) NOT NULL,
-    phone VARCHAR(20),
-    is_blocked TINYINT(1) DEFAULT 0,
-    address VARCHAR(255),
+    avatar VARCHAR(255) DEFAULT NULL,
+    -- verification fields
+    id_document VARCHAR(255) DEFAULT NULL,
+    id_selfie VARCHAR(255) DEFAULT NULL,
+    gender VARCHAR(16) DEFAULT NULL,
+    date_of_birth DATE DEFAULT NULL,
+    phone VARCHAR(32) DEFAULT NULL,
+    address VARCHAR(255) DEFAULT NULL,
+    is_verified TINYINT(1) DEFAULT 0,
     oauth_provider VARCHAR(50) DEFAULT NULL,
     oauth_id VARCHAR(255) DEFAULT NULL,
-    date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+    is_blocked TINYINT(1) DEFAULT 0,
+    date_created TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX (email)
+)
+ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS admin (
     admin_id INT AUTO_INCREMENT PRIMARY KEY,
@@ -103,4 +112,91 @@ CREATE TABLE IF NOT EXISTS analytics (
     rejected_bookings INT DEFAULT 0,
     total_income DECIMAL(10,2) DEFAULT 0.00
 );
+
+
+DELIMITER $$
+DROP PROCEDURE IF EXISTS ensure_users_profile_columns$$
+CREATE PROCEDURE ensure_users_profile_columns()
+BEGIN
+    DECLARE cnt INT DEFAULT 0;
+   
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'addreess';
+    IF cnt > 0 THEN
+        SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'address';
+        IF cnt = 0 THEN
+            SET @s = CONCAT('ALTER TABLE `', DATABASE(), '`.`users` CHANGE COLUMN `addreess` `address` VARCHAR(255) DEFAULT NULL');
+            PREPARE stmt FROM @s; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+        END IF;
+    END IF;
+
+   
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'avatar';
+    IF cnt = 0 THEN
+        ALTER TABLE users ADD COLUMN avatar VARCHAR(255) DEFAULT NULL;
+    END IF;
+
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'id_document';
+    IF cnt = 0 THEN
+        ALTER TABLE users ADD COLUMN id_document VARCHAR(255) DEFAULT NULL;
+    END IF;
+
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'id_selfie';
+    IF cnt = 0 THEN
+        ALTER TABLE users ADD COLUMN id_selfie VARCHAR(255) DEFAULT NULL;
+    END IF;
+
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'is_verified';
+    IF cnt = 0 THEN
+        ALTER TABLE users ADD COLUMN is_verified TINYINT(1) DEFAULT 0;
+    END IF;
+
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'verification_requested';
+    IF cnt = 0 THEN
+        ALTER TABLE users ADD COLUMN verification_requested TINYINT(1) DEFAULT 0;
+    END IF;
+
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'verification_requested_at';
+    IF cnt = 0 THEN
+        ALTER TABLE users ADD COLUMN verification_requested_at DATETIME DEFAULT NULL;
+    END IF;
+
+    
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'gender';
+    IF cnt = 0 THEN
+        ALTER TABLE users ADD COLUMN gender VARCHAR(16) DEFAULT NULL;
+    END IF;
+
+   
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'date_of_birth';
+    IF cnt = 0 THEN
+        ALTER TABLE users ADD COLUMN date_of_birth DATE DEFAULT NULL;
+    END IF;
+
+    
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'phone';
+    IF cnt = 0 THEN
+        ALTER TABLE users ADD COLUMN phone VARCHAR(32) DEFAULT NULL;
+    END IF;
+
+   
+    SELECT COUNT(*) INTO cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'address';
+    IF cnt = 0 THEN
+        ALTER TABLE users ADD COLUMN address VARCHAR(255) DEFAULT NULL;
+    END IF;
+END$$
+CALL ensure_users_profile_columns()$$
+DROP PROCEDURE IF EXISTS ensure_users_profile_columns$$
+DELIMITER ;
 

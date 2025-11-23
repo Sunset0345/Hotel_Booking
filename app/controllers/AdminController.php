@@ -768,19 +768,31 @@ class AdminController extends Controller {
         if(!$this->session->has_userdata('admin')){ redirect(site_url('admin/login')); return; }
 
         $this->call->model('UsersModel');
-
-        $page = intval($this->io->get('page')) ?: 1;
-        $per_page = 10;
-
-        $pagination = $this->UsersModel->paginate($per_page, $page);
+        // Fetch all users (old + new) for full list view — no pagination
+        try{
+            $stmt = $this->UsersModel->raw("SELECT u.* FROM users u ORDER BY u.full_name ASC");
+            $users = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+            $total = is_array($users) ? count($users) : 0;
+        } catch(Exception $e){
+            $users = [];
+            $total = 0;
+        }
 
         $data = [
-            'users' => $pagination['data'],
-            'total' => $pagination['total'],
-            'per_page' => $pagination['per_page'],
-            'current_page' => $pagination['current_page'],
-            'last_page' => $pagination['last_page']
+            'users' => $users,
+            'total' => $total,
+            'per_page' => $total,
+            'current_page' => 1,
+            'last_page' => 1
         ];
+        // also provide count of pending verification requests for admin UI
+        try{
+            $stmt = $this->UsersModel->raw("SELECT COUNT(*) AS cnt FROM users WHERE verification_requested = 1 AND COALESCE(is_verified,0) = 0");
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $data['pending_verifications'] = isset($row['cnt']) ? intval($row['cnt']) : 0;
+        } catch(Exception $e){
+            $data['pending_verifications'] = 0;
+        }
 
         // return fragment for AJAX requests, otherwise redirect to /admin and
         // request the dashboard to load the users fragment in-place.
@@ -848,6 +860,112 @@ class AdminController extends Controller {
         }else{
             echo 'Error deleting user.';
         }
+    }
+
+    // List verification requests for admin review
+    public function verification_requests()
+    {
+        if(!$this->session->has_userdata('admin')){ redirect(site_url('admin/login')); return; }
+        $this->call->model('UsersModel');
+        $focus_user = intval($this->io->get('user_id')) ?: null;
+        try{
+            $stmt = $this->UsersModel->raw("SELECT * FROM users WHERE verification_requested = 1 AND COALESCE(is_verified,0) = 0 ORDER BY verification_requested_at DESC");
+            $requests = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch(Exception $e){ $requests = []; }
+
+        if($this->io->is_ajax()){
+            $this->call->view('admin/verification_requests', ['requests' => $requests, 'admin_action_token' => $this->session->userdata('admin_action_token'), 'focus_user' => $focus_user]);
+            return;
+        }
+        try{ $this->session->set_userdata('admin_initial_load', 'verification_requests'); } catch(Exception $e) {}
+        redirect(site_url('admin'));
+    }
+
+    // Approve a verification request
+    public function verification_approve($user_id = null)
+    {
+        if(!$this->session->has_userdata('admin')){ http_response_code(401); echo 'Not authorized'; return; }
+        if(!$user_id){ http_response_code(400); echo 'User id required'; return; }
+        // verify admin token
+        $providedToken = $this->io->post('admin_token') ?: $this->io->get('admin_token');
+        if(empty($providedToken) && isset($_COOKIE['admin_action_token'])){ $providedToken = $_COOKIE['admin_action_token']; }
+        $sessionToken = $this->session->userdata('admin_action_token') ?? null;
+        if(empty($providedToken) || empty($sessionToken) || !hash_equals((string)$sessionToken, (string)$providedToken)){
+            http_response_code(403); echo 'Invalid admin action token'; return;
+        }
+        $this->call->model('UsersModel');
+        try{
+            $ok = $this->UsersModel->update(intval($user_id), ['is_verified' => 1, 'verification_requested' => 0, 'verification_requested_at' => NULL]);
+            if($ok){
+                // audit
+                try{ $this->call->model('AdminAuditModel'); $admin_id = $this->session->userdata('admin')['admin_id'] ?? null; $this->AdminAuditModel->insert(['admin_id'=>$admin_id,'user_id'=>intval($user_id),'action'=>'verification_approved','note'=>'Approved verification','ip'=>$_SERVER['REMOTE_ADDR'] ?? 'cli']); } catch(Exception $e){}
+                // notify user by message and email
+                try{
+                    $this->call->model('UsersModel');
+                    $user = $this->UsersModel->find($user_id);
+                    if($user){
+                        $msg = 'Your identity verification has been approved. You may now create bookings.';
+                        // create message (admin -> user)
+                        try{ $this->call->model('MessagesModel'); $this->MessagesModel->insert(['from_admin' => 1, 'user_id' => intval($user_id), 'message' => $msg]); } catch(Exception $e){}
+                        // send email if email available
+                        if(!empty($user['email'])){
+                            try{
+                                $this->call->email->to($user['email']);
+                                $this->call->email->subject('Verification approved');
+                                $body = "Hello " . htmlspecialchars($user['full_name']) . ",<br><br>" . $msg . "<br><br>Thank you,<br>Admin";
+                                $this->call->email->message($body);
+                                $this->call->email->send();
+                            } catch(Exception $e){ /* ignore email errors */ }
+                        }
+                    }
+                } catch(Exception $e){ /* ignore notify errors */ }
+            }
+            if($this->io->is_ajax()){ header('Content-Type: application/json'); echo json_encode(['status' => $ok ? 'ok' : 'error']); return; }
+            redirect(site_url('admin/verification_requests'));
+        } catch(Exception $e){ http_response_code(500); echo 'Exception: ' . $e->getMessage(); return; }
+    }
+
+    // Reject a verification request
+    public function verification_reject($user_id = null)
+    {
+        if(!$this->session->has_userdata('admin')){ http_response_code(401); echo 'Not authorized'; return; }
+        if(!$user_id){ http_response_code(400); echo 'User id required'; return; }
+        $providedToken = $this->io->post('admin_token') ?: $this->io->get('admin_token');
+        if(empty($providedToken) && isset($_COOKIE['admin_action_token'])){ $providedToken = $_COOKIE['admin_action_token']; }
+        $sessionToken = $this->session->userdata('admin_action_token') ?? null;
+        if(empty($providedToken) || empty($sessionToken) || !hash_equals((string)$sessionToken, (string)$providedToken)){
+            http_response_code(403); echo 'Invalid admin action token'; return;
+        }
+        $this->call->model('UsersModel');
+        $note = trim($this->io->post('note') ?: $this->io->get('note') ?: '');
+        try{
+            $ok = $this->UsersModel->update(intval($user_id), ['verification_requested' => 0, 'verification_requested_at' => NULL]);
+            // audit
+            try{ $this->call->model('AdminAuditModel'); $admin_id = $this->session->userdata('admin')['admin_id'] ?? null; $this->AdminAuditModel->insert(['admin_id'=>$admin_id,'user_id'=>intval($user_id),'action'=>'verification_rejected','note'=>$note ?: 'Rejected verification','ip'=>$_SERVER['REMOTE_ADDR'] ?? 'cli']); } catch(Exception $e){}
+            // notify user by message and email with optional note
+            try{
+                $this->call->model('UsersModel');
+                $user = $this->UsersModel->find($user_id);
+                if($user){
+                    $msg = 'Your identity verification request has been rejected.' . (!empty($note) ? '\n\nReason: ' . $note : '');
+                    try{ $this->call->model('MessagesModel'); $this->MessagesModel->insert(['from_admin' => 1, 'user_id' => intval($user_id), 'message' => $msg]); } catch(Exception $e){}
+                    if(!empty($user['email'])){
+                        try{
+                            $this->call->email->to($user['email']);
+                            $this->call->email->subject('Verification rejected');
+                            $body = "Hello " . htmlspecialchars($user['full_name']) . ",<br><br>Your identity verification request has been rejected.";
+                            if(!empty($note)) { $body .= "<br><br><strong>Reason:</strong><br>" . nl2br(htmlspecialchars($note)); }
+                            $body .= "<br><br>Please update your documents and try again.<br><br>Regards,<br>Admin";
+                            $this->call->email->message($body);
+                            $this->call->email->send();
+                        } catch(Exception $e){ /* ignore email errors */ }
+                    }
+                }
+            } catch(Exception $e){ /* ignore notify errors */ }
+
+            if($this->io->is_ajax()){ header('Content-Type: application/json'); echo json_encode(['status' => $ok ? 'ok' : 'error']); return; }
+            redirect(site_url('admin/verification_requests'));
+        } catch(Exception $e){ http_response_code(500); echo 'Exception: ' . $e->getMessage(); return; }
     }
 
     public function users_block($id = null)

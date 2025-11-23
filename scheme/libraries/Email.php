@@ -313,7 +313,93 @@ class Email {
 
 		$recipients = implode(',', $this->recipients);
 
-        return mail($recipients, $this->subject, $contents, implode($out, $headers), '-f'.$this->sender);
+		// If SMTP fallback is enabled, try PHPMailer via SMTP first (avoid mail() entirely)
+		if (config_item('smtp_enabled')) {
+			// Attempt to load Composer autoload from common locations
+			$autoload_paths = [
+				dirname(__DIR__, 3) . '/vendor/autoload.php', // project root vendor (workspace root)
+				dirname(__DIR__, 2) . '/vendor/autoload.php', // app root vendor
+			];
+			$loaded = false;
+			foreach ($autoload_paths as $vendor_autoload) {
+				if (file_exists($vendor_autoload)) {
+					require_once $vendor_autoload;
+					$loaded = true;
+					break;
+				}
+			}
+			if (! $loaded) {
+				@file_put_contents(dirname(__DIR__,2) . '/runtime/logs/email.log', date('c') . " - Composer autoload not found in expected paths: " . implode(', ', $autoload_paths) . "\n", FILE_APPEND);
+			}
+			if (class_exists('\PHPMailer\\PHPMailer\\PHPMailer')) {
+					try {
+					$mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+					$mail->isSMTP();
+					$mail->Host = config_item('smtp_host');
+					$mail->Port = config_item('smtp_port');
+					$secure = config_item('smtp_secure');
+					if (!empty($secure)) $mail->SMTPSecure = $secure;
+					$smtp_user = config_item('smtp_user');
+					$smtp_pass = config_item('smtp_pass');
+					if (!empty($smtp_user)) {
+						$mail->SMTPAuth = true;
+						$mail->Username = $smtp_user;
+						$mail->Password = $smtp_pass;
+					}
+					// From
+					$from = config_item('smtp_from') ? config_item('smtp_from') : $this->sender;
+					$from_name = config_item('smtp_from_name') ? config_item('smtp_from_name') : $this->sender_name;
+					$mail->setFrom($from, $from_name);
+					// Recipients
+					foreach ($this->recipients as $r) {
+						$mail->addAddress($r);
+					}
+					if (!empty($this->reply_to)) {
+						$mail->addReplyTo($this->reply_to);
+					}
+					// Subject and body
+					$mail->Subject = $this->subject;
+					if ($this->emailType == 'plain') {
+						$mail->Body = $this->emailContent;
+						$mail->AltBody = $this->emailContent;
+					} else {
+						$mail->isHTML(true);
+						$mail->Body = $this->emailContent;
+					}
+					// Attachments
+					foreach ($this->attach_files as $f) {
+						if (file_exists($f)) $mail->addAttachment($f);
+					}
+							$sent = $mail->send();
+							if ($sent) {
+								return true;
+							} else {
+								// PHPMailer returned false; log error info and fall back
+								$errorMsg = method_exists($mail, 'ErrorInfo') ? $mail->ErrorInfo : 'Unknown PHPMailer error';
+								@file_put_contents(dirname(__DIR__,2) . '/runtime/logs/email.log', date('c') . " - PHPMailer send returned false: $errorMsg\n", FILE_APPEND);
+							}
+						} catch (\Exception $e) {
+							// PHPMailer exception; log it and fall back to mail()
+							@file_put_contents(dirname(__DIR__,2) . '/runtime/logs/email.log', date('c') . " - PHPMailer exception: " . $e->getMessage() . "\n", FILE_APPEND);
+						}
+			}
+					else {
+						@file_put_contents(dirname(__DIR__,2) . '/runtime/logs/email.log', date('c') . " - PHPMailer class not found; ensure phpmailer/phpmailer is installed via Composer.\n", FILE_APPEND);
+					}
+		}
+
+		// Try PHP mail() but suppress framework error handlers by setting a temporary error handler
+		$prev = set_error_handler(function() { /* ignore errors while calling mail() */ });
+		$mail_result = mail($recipients, $this->subject, $contents, implode($out, $headers), '-f'.$this->sender);
+		// restore previous error handler
+		restore_error_handler();
+		if ($mail_result) {
+			return true;
+		} else {
+			@file_put_contents(dirname(__DIR__,2) . '/runtime/logs/email.log', date('c') . " - PHP mail() failed for recipients: $recipients\n", FILE_APPEND);
+		}
+
+		return false;
 	}
 
 }

@@ -1,7 +1,10 @@
 <?php
 $router->get('/user', 'UserController::index');
 // user subpages: profile, bookings, messages
-$router->get('/user/profile', 'UserController::profile');
+// allow POST to /user/profile for backward compatibility (some clients still post here)
+$router->match('/user/profile', 'UserController::profile', ['GET', 'POST']);
+// edit user profile (view + submit)
+$router->match('/user/profile/edit', 'UserController::edit_profile', ['GET', 'POST']);
 $router->get('/user/bookings', 'UserController::bookings');
 $router->match('/user/messages', 'UserController::messages', ['GET', 'POST']);
 // Backwards-compatible alias: support singular /user/message URL which some users may type manually
@@ -59,6 +62,8 @@ $router->get('/users/delete/{id}', 'UsersController::delete');
 
 $router->get('/home', 'Welcome::index');
 $router->match('/auth/login', 'AuthController::login', ['GET', 'POST']);
+$router->get('/auth/oauth/google', 'AuthController::oauth_google');
+$router->get('/auth/oauth/facebook', 'AuthController::oauth_facebook');
 $router->match('/auth/register', 'AuthController::register', ['GET', 'POST']);
 $router->get('/auth/logout', 'AuthController::logout');
 // Debug endpoints (local development only)
@@ -79,6 +84,10 @@ $router->match('/admin/users/update/{id}', 'AdminController::users_update', ['PO
 $router->get('/admin/users/delete/{id}', 'AdminController::users_delete');
 // block/unblock user
 $router->get('/admin/users/block/{id}', 'AdminController::users_block');
+// verification requests (admin)
+$router->get('/admin/verification_requests', 'AdminController::verification_requests');
+$router->match('/admin/verification_approve/{id}', 'AdminController::verification_approve', ['GET','POST']);
+$router->match('/admin/verification_reject/{id}', 'AdminController::verification_reject', ['GET','POST']);
 $router->get('/admin/bookings', 'AdminController::bookings');
 // admin audit logs
 $router->get('/admin/audit', 'AdminController::audit');

@@ -1,5 +1,7 @@
 {
     "require": {
+        
+        "php": "'^8.0'",
         "google/apiclient": "^2.16",
         "facebook/graph-sdk": "^5.7",
         "phpmailer/phpmailer": "^7.0"

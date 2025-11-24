@@ -21,7 +21,7 @@
     <div style="padding:14px;color:#666">You have no bookings yet.</div>
   <?php else: ?>
     <div style="display:flex;flex-direction:column;gap:12px">
-      <?php foreach($bookings as $b): ?>
+            <?php foreach($bookings as $b): ?>
         <div style="border:1px solid #eef2f7;padding:14px;border-radius:10px;background:#ffffff">
           <div style="display:flex;justify-content:space-between;align-items:center">
             <div>
@@ -30,6 +30,13 @@
             </div>
             <div style="text-align:right">
               <div style="font-weight:700;color:<?php echo (strtolower($b['status']) === 'approved') ? '#16a34a' : (strtolower($b['status']) === 'rejected' ? '#ef4444' : '#0b74de'); ?>"><?php echo htmlspecialchars($b['status']); ?></div>
+              <div style="margin-top:8px">
+                <?php $st = strtolower(trim($b['status'] ?? '')); if(in_array($st, ['approved','completed'])): ?>
+                  <a href="<?php echo site_url('user/invoice/' . intval($b['booking_id'])); ?>" class="btn" style="padding:6px 10px;background:#0b74de;color:#fff;border-radius:8px;text-decoration:none;font-weight:600">Download Invoice</a>
+                <?php else: ?>
+                  <span style="display:inline-block;padding:6px 10px;background:#f3f4f6;color:#6b7280;border-radius:8px;font-size:0.9rem">Invoice (available after approval or completion)</span>
+                <?php endif; ?>
+              </div>
             </div>
           </div>
         </div>

@@ -7,9 +7,37 @@
         <a href="<?php echo site_url('admin/bookings'); ?>" data-ajax data-ajax-no-push style="display:inline-block;padding:8px 12px;background:transparent;color:#000;border-radius:6px;text-decoration:none;border:1px solid #e6e6e6">Back to Bookings</a>
     </div>
 
-    <!-- Audit table removed per request; completed bookings shown below -->
+    <!-- Audit table (restored): show full admin_audit rows fetched by controller -->
+    <div style="margin-top:8px">
+        <h3 style="margin:8px 0 10px 0;color:#000">Audit Entries</h3>
 
-        <div style="margin-top:18px">
+        <div style="background:transparent;padding:12px;border-radius:8px;margin-bottom:18px">
+            <?php if(!empty($audits) && is_array($audits)): ?>
+                <table style="width:100%;border-collapse:collapse;background:transparent;color:#000;font-size:0.95rem">
+                    <thead>
+                        <tr style="text-align:left;border-bottom:1px solid #e6e6e6"><th style="padding:6px">ID</th><th style="padding:6px">Admin</th><th style="padding:6px">Booking</th><th style="padding:6px">User</th><th style="padding:6px">Action</th><th style="padding:6px">Note</th><th style="padding:6px">IP</th><th style="padding:6px">When</th></tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach($audits as $a): ?>
+                        <tr style="border-bottom:1px solid #f1f1f1;color:#000">
+                            <td style="padding:6px;vertical-align:top"><?php echo intval($a['audit_id'] ?? 0); ?></td>
+                            <td style="padding:6px;vertical-align:top"><?php echo htmlspecialchars($a['admin_id'] ?? ''); ?></td>
+                            <td style="padding:6px;vertical-align:top"><?php echo htmlspecialchars($a['booking_id'] ?? ''); ?></td>
+                            <td style="padding:6px;vertical-align:top"><?php echo htmlspecialchars($a['user_id'] ?? ''); ?></td>
+                            <td style="padding:6px;vertical-align:top"><?php echo htmlspecialchars($a['action'] ?? ''); ?></td>
+                            <td style="padding:6px;vertical-align:top;max-width:360px;white-space:pre-wrap;word-break:break-word"><?php echo htmlspecialchars($a['note'] ?? ''); ?></td>
+                            <td style="padding:6px;vertical-align:top"><?php echo htmlspecialchars($a['ip'] ?? ''); ?></td>
+                            <td style="padding:6px;vertical-align:top"><?php echo htmlspecialchars($a['date_created'] ?? ($a['created_at'] ?? '')); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            <?php else: ?>
+                <div style="color:#333">No audit entries found.</div>
+            <?php endif; ?>
+        </div>
+
+        <div style="margin-top:8px">
             <h3 style="margin:8px 0 10px 0;color:#000">Completed Bookings</h3>
 
             <div style="background:transparent;padding:12px;border-radius:8px">
@@ -26,7 +54,7 @@
                             <td style="padding:6px;vertical-align:top"><?php echo htmlspecialchars($cb['room_number'] ?? $cb['room_id'] ?? ''); ?></td>
                             <td style="padding:6px;vertical-align:top"><?php echo htmlspecialchars($cb['check_in'] ?? ''); ?></td>
                             <td style="padding:6px;vertical-align:top"><?php echo htmlspecialchars($cb['check_out'] ?? ''); ?></td>
-                            <td style="padding:6px;vertical-align:top">$<?php echo number_format($cb['total_amount'] ?? 0, 2); ?></td>
+                            <td style="padding:6px;vertical-align:top">₱<?php echo number_format($cb['total_amount'] ?? 0, 2); ?></td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>

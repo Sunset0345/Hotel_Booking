@@ -16,7 +16,7 @@
                 <div style="padding:12px;flex:1">
                     <strong><?php echo htmlspecialchars($r['room_number']); ?></strong>
                     <div style="font-size:13px;color:#666"><?php echo htmlspecialchars($r['room_type']); ?></div>
-                    <div style="margin-top:8px">$<?php echo number_format($r['price_per_night'],2); ?> · <?php echo intval($r['capacity']); ?> guests</div>
+                    <div style="margin-top:8px">₱<?php echo number_format($r['price_per_night'],2); ?> · <?php echo intval($r['capacity']); ?> guests</div>
                     <div style="color:#444;font-size:0.9em;margin-top:8px;min-height:36px"><?php echo htmlspecialchars($r['description']); ?></div>
                 </div>
                 <div style="display:flex;gap:8px;padding:10px;border-top:1px solid #f0f0f0">

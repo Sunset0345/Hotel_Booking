@@ -52,7 +52,7 @@
                             <div class="stat"><strong>Rooms</strong><div><?php echo intval(isset($rooms) ? $rooms : 0); ?></div></div>
                             <div class="stat"><strong>Bookings</strong><div><?php echo intval(isset($bookings) ? $bookings : 0); ?></div></div>
                             <div class="stat"><strong>Users</strong><div><?php echo intval(isset($users) ? $users : 0); ?></div></div>
-                            <div class="stat"><strong>Revenue</strong><div>$<?php echo number_format(isset($revenue) ? $revenue : 0, 2); ?></div></div>
+                            <div class="stat"><strong>Revenue</strong><div>₱<?php echo number_format(isset($revenue) ? $revenue : 0, 2); ?></div></div>
                         </div>
 
                         <div style="margin-top:18px">

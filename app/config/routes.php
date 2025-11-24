@@ -6,6 +6,7 @@ $router->match('/user/profile', 'UserController::profile', ['GET', 'POST']);
 // edit user profile (view + submit)
 $router->match('/user/profile/edit', 'UserController::edit_profile', ['GET', 'POST']);
 $router->get('/user/bookings', 'UserController::bookings');
+$router->get('/user/invoice/{id}', 'UserController::invoice');
 $router->match('/user/messages', 'UserController::messages', ['GET', 'POST']);
 // Backwards-compatible alias: support singular /user/message URL which some users may type manually
 $router->get('/user/message', 'UserController::messages');
@@ -53,6 +54,7 @@ defined('PREVENT_DIRECT_ACCESS') OR exit('No direct script access allowed');
 
 $router->get('/', 'Welcome::index');
 $router->get('/rooms', 'RoomsController::index');
+$router->get('/rooms/view/{id}', 'RoomsController::view');
 $router->match('/bookings/create/{room_id}', 'BookingsController::create', ['GET', 'POST']);
 // Debug helper (localhost only)
 $router->get('/bookings/debug_insert', 'BookingsController::debug_insert');
@@ -97,6 +99,8 @@ $router->get('/admin/booking', 'AdminController::bookings');
 $router->match('/admin/booking/update/{id}', 'AdminController::bookings_update', ['GET', 'POST']);
 $router->match('/admin/rooms/add', 'AdminController::rooms_add', ['GET', 'POST']);
 $router->get('/admin/rooms', 'AdminController::rooms_list');
+// Backwards-compatible alias used by older links/sites
+$router->get('/admin/rooms_list', 'AdminController::rooms_list');
 $router->get('/admin/rooms/available', 'AdminController::rooms_available');
 $router->match('/admin/rooms/edit/{id}', 'AdminController::rooms_edit', ['GET', 'POST']);
 $router->match('/admin/rooms/update/{id}', 'AdminController::rooms_update', ['POST']);

@@ -10,17 +10,18 @@
                 <?php endif; ?>
             </div>
             <?php if(isset($r['booking_state']) && strtolower($r['booking_state']) === 'pending'): ?>
-                <div style="position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(255,255,255,0.92);display:flex;align-items:center;justify-content:center;z-index:20">
-                    <span style="display:inline-block;padding:10px 14px;background:#f59e0b;color:#fff;border-radius:6px;font-weight:700;box-shadow:0 4px 12px rgba(0,0,0,0.12)">Pending</span>
+                <div style="position:absolute;top:12px;left:12px;z-index:30">
+                    <span style="display:inline-block;padding:6px 10px;background:#f59e0b;color:#fff;border-radius:6px;font-weight:700;box-shadow:0 4px 10px rgba(0,0,0,0.12);font-size:13px">Pending</span>
                 </div>
             <?php endif; ?>
             <div style="padding:12px">
                 <strong><?php echo htmlspecialchars($r['room_number']); ?></strong>
                 <div style="color:#666"><?php echo htmlspecialchars($r['room_type']); ?></div>
-                <div style="margin-top:8px">$<?php echo number_format($r['price_per_night'],2); ?> · <?php echo intval($r['capacity']); ?> guests</div>
+                <div style="margin-top:8px">₱<?php echo number_format($r['price_per_night'],2); ?> · <?php echo intval($r['capacity']); ?> guests</div>
                 <div style="margin-top:12px">
                     <?php
-                        $isReserved = (isset($r['booking_state']) && $r['booking_state'] === 'booked') || (isset($r['status']) && strtolower($r['status']) === 'approved');
+                        // only consider a room reserved when it's currently occupied ('booked')
+                        $isReserved = (isset($r['booking_state']) && $r['booking_state'] === 'booked');
                     ?>
                     <?php if($isReserved): ?>
                         <span style="display:inline-block;padding:8px 12px;background:#6b7280;color:#fff;border-radius:6px">Reserved</span>

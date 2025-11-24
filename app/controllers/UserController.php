@@ -41,30 +41,44 @@ class UserController extends Controller {
         } catch(Exception $e){
             $conversation = [];
         }
-        $rooms = $this->RoomsModel->All();
+        // Fetch rooms ordered numerically by room_number so room '1' appears first
+        try{
+            $stmt = $this->RoomsModel->raw('SELECT * FROM rooms ORDER BY CAST(room_number AS UNSIGNED) ASC, room_number ASC');
+            $rooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch(Exception $e){
+            // Fallback to existing convenience method if raw query fails for any reason
+            try{ $rooms = $this->RoomsModel->All(); } catch(Exception $ie) { $rooms = []; }
+        }
         // annotate rooms with booking state: available | pending | booked
         $today = date('Y-m-d');
         if(!empty($rooms)){
             foreach($rooms as &$r){
                 $r['booking_state'] = 'available';
                 try{
-                    // check for approved bookings that are still relevant (not already past)
-                    $sql = 'SELECT status, check_in, check_out FROM bookings WHERE room_id = ? AND check_out >= ? AND status IN (?, ?) ORDER BY date_booked DESC';
-                    $stmt = $this->BookingsModel->raw($sql, [intval($r['room_id']), $today, 'approved', 'pending']);
+                    // fetch any approved or pending bookings for this room
+                    $sql = 'SELECT status, check_in, check_out FROM bookings WHERE room_id = ? AND status IN (?, ?) ORDER BY check_in ASC, check_out ASC';
+                    $stmt = $this->BookingsModel->raw($sql, [intval($r['room_id']), 'approved', 'pending']);
                     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
                     if(!empty($rows)){
-                        // if any approved exists, mark as booked (hide from users)
+                        // mark as currently occupied (booked) only when today is within an approved booking
                         foreach($rows as $row){
-                            if(strtolower($row['status']) === 'approved'){
-                                $r['booking_state'] = 'booked';
-                                break 2;
+                            $st = strtolower($row['status']);
+                            $ci = isset($row['check_in']) ? $row['check_in'] : null;
+                            $co = isset($row['check_out']) ? $row['check_out'] : null;
+                            if($st === 'approved' && $ci && $co){
+                                if($ci <= $today && $co >= $today){
+                                    $r['booking_state'] = 'booked';
+                                    break; // currently occupied
+                                }
                             }
                         }
-                        // otherwise if pending exists, mark as pending (transparent)
-                        foreach($rows as $row){
-                            if(strtolower($row['status']) === 'pending'){
-                                $r['booking_state'] = 'pending';
-                                break;
+                        // if not currently occupied but there are pending bookings, mark as pending visually
+                        if($r['booking_state'] !== 'booked'){
+                            foreach($rows as $row){
+                                if(strtolower($row['status']) === 'pending'){
+                                    $r['booking_state'] = 'pending';
+                                    break;
+                                }
                             }
                         }
                     }
@@ -75,7 +89,25 @@ class UserController extends Controller {
             unset($r);
         }
 
-        $this->call->view('user/index', ['user' => $user, 'rooms' => $rooms, 'conversation' => $conversation]);
+        // If a specific room was requested via ?room_id=, render the room view fragment
+        $roomFragment = null;
+        try{
+            $requestedRoom = intval($this->io->get('room_id')) ?: null;
+        } catch(Exception $e){
+            $requestedRoom = isset($_GET['room_id']) ? intval($_GET['room_id']) : null;
+        }
+        if($requestedRoom){
+            try{
+                $room = $this->RoomsModel->find($requestedRoom);
+                if($room){
+                    ob_start();
+                    $this->call->view('rooms/view', ['room' => $room, 'flashes' => (function_exists('flash_get') ? flash_get() : [])]);
+                    $roomFragment = ob_get_clean();
+                }
+            } catch(Exception $e){ /* ignore render failures */ }
+        }
+
+        $this->call->view('user/index', ['user' => $user, 'rooms' => $rooms, 'conversation' => $conversation, 'room_fragment' => $roomFragment]);
     }
 
     public function profile()
@@ -603,6 +635,159 @@ class UserController extends Controller {
         $stmt = $this->BookingsModel->raw($sql, [intval($user['user_id'])]);
         $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $this->call->view('user/bookings', ['user' => $user, 'bookings' => $bookings]);
+    }
+
+    // Download invoice/receipt for a booking (returns a downloadable HTML invoice)
+    public function invoice($booking_id = null)
+    {
+        if(!$this->session->has_userdata('user')){ redirect(site_url('auth/login')); return; }
+        if(!$booking_id){ echo 'Booking id required'; return; }
+
+        $user = $this->session->userdata('user');
+        // fetch booking with room and user info
+        try{
+            $stmt = $this->BookingsModel->raw('SELECT b.*, r.room_number, r.room_type, u.full_name, u.email FROM bookings b LEFT JOIN rooms r ON r.room_id = b.room_id LEFT JOIN users u ON u.user_id = b.user_id WHERE b.booking_id = ? LIMIT 1', [intval($booking_id)]);
+            $booking = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
+        } catch(Exception $e){ $booking = false; }
+
+        if(!$booking){ http_response_code(404); echo 'Booking not found'; return; }
+        // ensure the booking belongs to the current user (security)
+        if(intval($booking['user_id']) !== intval($user['user_id'])){ http_response_code(403); echo 'Forbidden'; return; }
+        // Only allow invoice download for approved or completed bookings
+        $st = strtolower(trim($booking['status'] ?? ''));
+        if(!in_array($st, ['approved','completed'], true)){
+            // If AJAX request, return JSON 403
+            try{ if($this->io->is_ajax()){ header('Content-Type: application/json'); http_response_code(403); echo json_encode(['status'=>'forbidden','message'=>'Invoice available only for approved or completed bookings.']); return; } } catch(Exception $e) {}
+            flash_set('error', 'Invoice is available only for approved or completed bookings.'); redirect('user/bookings'); return;
+        }
+
+        // Build a professional hotel-style HTML invoice
+        $hotelName = 'Sunset Hotel & Suites';
+        $hotelAddress = '123 Seaview Avenue, Sunset City';
+        $hotelPhone = '+63 912 345 6789';
+        $hotelEmail = 'reservations@sunsethotel.example';
+        $logoPath = PUBLIC_DIR . '/uploads/logo.png';
+        $logoUrl = file_exists($logoPath) ? site_url('uploads/logo.png') : null;
+        $bgPath = PUBLIC_DIR . '/uploads/invoice-bg.jpg';
+        $bgUrl = file_exists($bgPath) ? site_url('uploads/invoice-bg.jpg') : null;
+
+        $guestName = htmlspecialchars($booking['full_name'] ?? '');
+        $guestEmail = htmlspecialchars($booking['email'] ?? '');
+        $room = htmlspecialchars($booking['room_number'] ?? '') . ' — ' . htmlspecialchars($booking['room_type'] ?? '');
+        $checkIn = htmlspecialchars($booking['check_in'] ?? '');
+        $checkOut = htmlspecialchars($booking['check_out'] ?? '');
+        $status = htmlspecialchars($booking['status'] ?? '');
+        $amount = number_format((float)($booking['total_amount'] ?? 0), 2);
+        $bookingRef = intval($booking['booking_id']);
+
+        $invoiceHtml = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">';
+        $invoiceHtml .= '<title>Invoice #' . $bookingRef . ' - ' . htmlspecialchars($hotelName) . '</title>';
+        $invoiceHtml .= '<style>
+            :root{--accent:#0b74de;--muted:#6b6b6b;--bg:#ffffff}
+            body{font-family: "Helvetica Neue",Helvetica,Arial,sans-serif;margin:0;padding:24px;background:#f4f6f8;color:#111}
+            .container{max-width:900px;margin:0 auto;background:var(--bg);box-shadow:0 2px 12px rgba(16,24,40,0.06);border-radius:8px;overflow:hidden}
+            .header{padding:28px 32px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #eef2f6}
+            .brand{display:flex;align-items:center;gap:18px}
+            .brand img{height:64px;width:auto;border-radius:6px}
+            .hotel{font-size:18px;font-weight:700;color:#0b2f6b}
+            .hotel-sub{font-size:13px;color:var(--muted);margin-top:2px}
+            .meta{font-size:14px;color:var(--muted);text-align:right}
+            .body{padding:28px 32px}
+            .section{display:flex;gap:18px}
+            .col{flex:1}
+            .col.small{flex:0 0 320px}
+            table{width:100%;border-collapse:collapse;margin-top:14px}
+            th,td{padding:10px;border-bottom:1px solid #f1f5f9;text-align:left;font-size:14px}
+            th{background:#fafbfc;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:0.02em}
+            .total-row td{border-top:2px solid #e6eef8;font-weight:700}
+            .muted{color:var(--muted);font-size:13px}
+            .footer{padding:20px 32px;background:#fbfdff;border-top:1px solid #eef2f6;font-size:13px;color:var(--muted)}
+            .badge{display:inline-block;padding:6px 10px;border-radius:16px;background:var(--accent);color:#fff;font-weight:600;font-size:13px}
+            @media print{ body{background:#fff} .container{box-shadow:none} }
+        </style></head><body>';
+
+        // If a background image exists, apply a subtle overlay so text remains readable
+        $bgStyle = '';
+        if(!empty($bgUrl)){
+            $bgEsc = htmlspecialchars($bgUrl, ENT_QUOTES, 'UTF-8');
+            $bgStyle = 'background-image: linear-gradient(rgba(255,255,255,0.92), rgba(255,255,255,0.92)), url("' . $bgEsc . '"); background-size: cover; background-position: center;';
+        }
+        $invoiceHtml .= '<div class="container" style="' . $bgStyle . '">';
+        $invoiceHtml .= '<div class="header">';
+        $invoiceHtml .= '<div class="brand">';
+        if($logoUrl){ $invoiceHtml .= '<img src="' . htmlspecialchars($logoUrl) . '" alt="' . htmlspecialchars($hotelName) . ' logo">'; }
+        $invoiceHtml .= '<div><div class="hotel">' . htmlspecialchars($hotelName) . '</div><div class="hotel-sub">' . htmlspecialchars($hotelAddress) . ' • ' . htmlspecialchars($hotelPhone) . '</div></div>';
+        $invoiceHtml .= '</div>'; // brand
+
+        $invoiceHtml .= '<div class="meta">';
+        $invoiceHtml .= '<div style="font-size:16px;font-weight:700">Invoice</div>';
+        $invoiceHtml .= '<div class="muted">Invoice #: ' . $bookingRef . '</div>';
+        $invoiceHtml .= '<div class="muted">Date: ' . date('F j, Y') . '</div>';
+        $invoiceHtml .= '<div style="margin-top:8px"><span class="badge">' . strtoupper($status) . '</span></div>';
+        $invoiceHtml .= '</div>'; // meta
+        $invoiceHtml .= '</div>'; // header
+
+        $invoiceHtml .= '<div class="body">';
+        $invoiceHtml .= '<div class="section">';
+        $invoiceHtml .= '<div class="col">';
+        $invoiceHtml .= '<h4 style="margin:0 0 8px 0">Bill To</h4>';
+        $invoiceHtml .= '<div style="font-weight:600">' . $guestName . '</div>';
+        if(!empty($guestEmail)) $invoiceHtml .= '<div class="muted">' . $guestEmail . '</div>';
+        $invoiceHtml .= '</div>';
+
+        $invoiceHtml .= '<div class="col small">';
+        $invoiceHtml .= '<h4 style="margin:0 0 8px 0">Booking Details</h4>';
+        $invoiceHtml .= '<div><strong>Room:</strong> ' . $room . '</div>';
+        $invoiceHtml .= '<div><strong>Check-in:</strong> ' . $checkIn . '</div>';
+        $invoiceHtml .= '<div><strong>Check-out:</strong> ' . $checkOut . '</div>';
+        $invoiceHtml .= '</div>';
+        $invoiceHtml .= '</div>'; // section
+
+        // Charges table
+        $invoiceHtml .= '<table aria-label="Charges">';
+        $invoiceHtml .= '<thead><tr><th>Description</th><th style="width:140px;text-align:right">Amount</th></tr></thead><tbody>';
+        $invoiceHtml .= '<tr><td>Room charge (' . $room . ')</td><td style="text-align:right">₱' . $amount . '</td></tr>';
+        // If taxes or fees columns exist, try to show breakdown (best-effort)
+        $tax = 0.00;
+        $service = 0.00;
+        // If booking stores tax/service fields, use them
+        if(isset($booking['tax_amount'])){ $tax = (float)$booking['tax_amount']; $invoiceHtml .= '<tr><td>Taxes</td><td style="text-align:right">₱' . number_format($tax,2) . '</td></tr>'; }
+        if(isset($booking['service_fee'])){ $service = (float)$booking['service_fee']; $invoiceHtml .= '<tr><td>Service charge</td><td style="text-align:right">₱' . number_format($service,2) . '</td></tr>'; }
+        $sub = (float)$booking['total_amount'] - $tax - $service;
+        if($sub < 0) $sub = 0.00;
+        // Show subtotal only if tax/service were shown
+        if($tax > 0 || $service > 0){ $invoiceHtml .= '<tr><td class="muted">Subtotal</td><td style="text-align:right">₱' . number_format($sub,2) . '</td></tr>'; }
+        $invoiceHtml .= '<tr class="total-row"><td style="text-align:right">Total</td><td style="text-align:right">₱' . number_format((float)$booking['total_amount'],2) . '</td></tr>';
+        $invoiceHtml .= '</tbody></table>';
+
+        // Payment method info if available
+        if(!empty($booking['payment_method']) || !empty($booking['payment_status'])){
+            $invoiceHtml .= '<div style="margin-top:18px">';
+            $invoiceHtml .= '<strong>Payment</strong><div class="muted">' . htmlspecialchars($booking['payment_method'] ?? '—') . ' • ' . htmlspecialchars($booking['payment_status'] ?? '—') . '</div>';
+            $invoiceHtml .= '</div>';
+        }
+
+        $invoiceHtml .= '<div style="margin-top:18px;color:#333">';
+        $invoiceHtml .= '<strong>Notes</strong><div class="muted" style="margin-top:6px">Thank you for choosing ' . htmlspecialchars($hotelName) . '. For changes or cancellations, please contact us at ' . htmlspecialchars($hotelPhone) . ' or ' . htmlspecialchars($hotelEmail) . '.</div>';
+        $invoiceHtml .= '</div>';
+
+        $invoiceHtml .= '</div>'; // body
+
+        $invoiceHtml .= '<div class="footer">';
+        $invoiceHtml .= '<div style="display:flex;justify-content:space-between;align-items:center">';
+        $invoiceHtml .= '<div class="muted">' . htmlspecialchars($hotelName) . ' • ' . htmlspecialchars($hotelAddress) . ' • ' . htmlspecialchars($hotelPhone) . '</div>';
+        $invoiceHtml .= '<div class="muted">Generated on ' . date('F j, Y \@ H:i') . '</div>';
+        $invoiceHtml .= '</div>';
+        $invoiceHtml .= '</div>'; // footer
+
+        $invoiceHtml .= '</div>'; // container
+        $invoiceHtml .= '</body></html>';
+
+        // Force download as an HTML file named invoice-<id>.html
+        header('Content-Type: application/octet-stream');
+        header('Content-Disposition: attachment; filename="invoice-' . intval($booking['booking_id']) . '.html"');
+        echo $invoiceHtml;
+        return;
     }
 
     public function messages()

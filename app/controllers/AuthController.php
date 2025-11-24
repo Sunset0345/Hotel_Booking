@@ -17,7 +17,9 @@ class AuthController extends Controller {
                 $this->session->set_userdata('user', [
                     'user_id' => $user['user_id'],
                     'full_name' => $user['full_name'],
-                    'email' => $user['email']
+                    'email' => $user['email'],
+                    'is_verified' => isset($user['is_verified']) ? (int)$user['is_verified'] : 0,
+                    'verification_requested' => isset($user['verification_requested']) ? (int)$user['verification_requested'] : 0
                 ]);
                 redirect(site_url('user'));
                 return;
@@ -207,7 +209,9 @@ class AuthController extends Controller {
             $this->session->set_userdata('user', [
                 'user_id' => $user['user_id'],
                 'full_name' => $user['full_name'],
-                'email' => $user['email']
+                'email' => $user['email'],
+                'is_verified' => isset($user['is_verified']) ? (int)$user['is_verified'] : 0,
+                'verification_requested' => isset($user['verification_requested']) ? (int)$user['verification_requested'] : 0
             ]);
             redirect(site_url('user'));
         }
@@ -269,7 +273,9 @@ class AuthController extends Controller {
             $this->session->set_userdata('user', [
                 'user_id' => $user['user_id'],
                 'full_name' => $user['full_name'],
-                'email' => $user['email']
+                'email' => $user['email'],
+                'is_verified' => isset($user['is_verified']) ? (int)$user['is_verified'] : 0,
+                'verification_requested' => isset($user['verification_requested']) ? (int)$user['verification_requested'] : 0
             ]);
             redirect(site_url('user'));
         }

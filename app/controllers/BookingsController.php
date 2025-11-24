@@ -71,6 +71,37 @@ class BookingsController extends Controller {
             return;
         }
 
+        // Check for overlapping bookings (inclusive). If any overlap exists, refuse creation.
+        try{
+            if($this->BookingsModel->has_overlap($room_id, $check_in, $check_out)){
+                // Fetch conflicting bookings for diagnostics so we can show why it overlapped
+                try{
+                    $stmtConf = $this->BookingsModel->raw("SELECT booking_id, user_id, check_in, check_out, status FROM bookings WHERE room_id = ? AND status IN ('approved','pending') AND NOT (check_out < ? OR check_in > ?) ORDER BY check_in ASC", [$room_id, $check_in, $check_out]);
+                    $conflicts = $stmtConf ? $stmtConf->fetchAll(PDO::FETCH_ASSOC) : [];
+                } catch(Exception $e){ $conflicts = []; }
+
+                if ($this->io->is_ajax()){
+                    header('Content-Type: application/json'); http_response_code(409);
+                    echo json_encode(['status'=>'error','message'=>'Selected dates overlap an existing booking. Please choose different dates.','overlaps' => $conflicts]);
+                    return;
+                }
+
+                // Non-AJAX: include a short explanation listing the conflicting ranges (best-effort)
+                $msg = 'Selected dates overlap an existing booking. Please choose different dates.';
+                if(!empty($conflicts)){
+                    $parts = [];
+                    foreach(array_slice($conflicts,0,3) as $c){ $parts[] = ($c['check_in'] ?? '?') . ' → ' . ($c['check_out'] ?? '?') . ' (' . ($c['status'] ?? '') . ')'; }
+                    $msg .= ' Conflicting bookings: ' . implode(', ', $parts) . (count($conflicts) > 3 ? ' (and more)' : '');
+                }
+                flash_set('error', $msg);
+                redirect('rooms/view/' . $room_id);
+                return;
+            }
+        } catch(Exception $e){
+            // If the overlap check fails unexpectedly, log and continue to avoid blocking users
+            error_log('[BookingsController] overlap check failed: ' . $e->getMessage());
+        }
+
         // Calculate total using room price
         $this->call->model('RoomsModel');
         $price_per_night = $this->BookingsModel->get_room_price($room_id);

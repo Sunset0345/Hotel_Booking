@@ -126,6 +126,14 @@ class AdminController extends Controller {
             // fallback to zero on error
             $revenue = 0.0;
         }
+        // If payments table is not populated (e.g. mock flows) fall back to summing approved/completed bookings
+        try{
+            if (empty($revenue) || $revenue <= 0){
+                $stmt2 = $this->BookingsModel->raw("SELECT COALESCE(SUM(total_amount),0) AS total FROM bookings WHERE status IN ('approved','completed')");
+                $row2 = $stmt2->fetch(PDO::FETCH_ASSOC);
+                $revenue = isset($row2['total']) ? (float) $row2['total'] : $revenue;
+            }
+        } catch(Exception $e){ /* ignore fallback errors */ }
 
         // fetch a few recent pending bookings to show on dashboard for quick actions
         try{
@@ -264,11 +272,11 @@ class AdminController extends Controller {
         if(!$this->session->has_userdata('admin')){ redirect(site_url('admin/login')); return; }
         $this->call->model('BookingsModel');
         // fetch bookings with guest and room info
-    // Exclude completed bookings here — completed bookings are shown in the audit page
+    // Exclude bookings that are completed or ended here — those are shown in the audit page
     $sql = "SELECT b.*, u.full_name, r.room_number FROM bookings b
         LEFT JOIN users u ON u.user_id = b.user_id
         LEFT JOIN rooms r ON r.room_id = b.room_id
-        WHERE COALESCE(b.status,'') <> 'completed'
+        WHERE COALESCE(LOWER(b.status),'') NOT IN ('completed','ended')
         ORDER BY b.date_booked DESC";
         $stmt = $this->BookingsModel->raw($sql);
         $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -293,7 +301,8 @@ class AdminController extends Controller {
         $this->call->model('AdminAuditModel');
         // fetch recent audits (limit 200)
         try{
-            $sql = "SELECT aa.*, a.full_name AS admin_name FROM admin_audit aa LEFT JOIN admin a ON a.admin_id = aa.admin_id ORDER BY aa.date_created DESC LIMIT 200";
+            // Fetch all rows directly from the admin_audit table (match SELECT * FROM `admin_audit`)
+            $sql = "SELECT * FROM admin_audit ORDER BY date_created DESC";
             $stmt = $this->AdminAuditModel->raw($sql);
             $audits = $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch(Exception $e){
@@ -304,7 +313,9 @@ class AdminController extends Controller {
         $completed = [];
         try{
             $this->call->model('BookingsModel');
-            $sql2 = "SELECT b.*, u.full_name, r.room_number FROM bookings b LEFT JOIN users u ON u.user_id = b.user_id LEFT JOIN rooms r ON r.room_id = b.room_id WHERE b.status = 'completed' ORDER BY b.date_booked DESC LIMIT 200";
+            // Include bookings marked completed OR ended in the audit completed bookings list
+            $sql2 = "SELECT b.*, u.full_name, r.room_number FROM bookings b LEFT JOIN users u ON u.user_id = b.user_id LEFT JOIN rooms r ON r.room_id = b.room_id WHERE COALESCE(LOWER(b.status),'') IN ('completed','ended') ORDER BY b.date_booked DESC";
+            // Remove LIMIT to fetch all completed/ended bookings
             $stmt2 = $this->BookingsModel->raw($sql2);
             $completed = $stmt2->fetchAll(PDO::FETCH_ASSOC);
         } catch(Exception $e){
@@ -344,6 +355,8 @@ class AdminController extends Controller {
                 return;
             }
 
+            // normalize room number (trim and uppercase) for comparison when updating
+
             // handle image upload if provided
             $image_path = NULL;
             if(isset($_FILES['image']) && $_FILES['image']['error'] !== UPLOAD_ERR_NO_FILE){
@@ -380,6 +393,20 @@ class AdminController extends Controller {
                 'image' => $image_path
             ];
 
+            // Prevent duplicate room_number (there is a unique key in the DB)
+            try{
+                $stmtCheck = $this->RoomsModel->raw('SELECT room_id FROM rooms WHERE room_number = ? LIMIT 1', [$room_number]);
+                $exists = $stmtCheck ? $stmtCheck->fetch(PDO::FETCH_ASSOC) : false;
+                if($exists){
+                    $data['error'] = 'Room number already exists. Please choose a different room number.';
+                    $this->call->view('admin/rooms_add', $data);
+                    return;
+                }
+            } catch(Exception $e){
+                // if check fails, log and continue to let DB throw the unique constraint error
+                error_log('[AdminController] rooms_add duplicate check failed: ' . $e->getMessage());
+            }
+
             if($this->RoomsModel->insert($roomData)){
                 // redirect back to rooms list (or admin dashboard)
                 if($this->io->is_ajax()){
@@ -406,10 +433,40 @@ class AdminController extends Controller {
     public function rooms_list()
     {
         if(!$this->session->has_userdata('admin')){ redirect(site_url('admin/login')); return; }
-    // fetch rooms list and pass to view
-    $rooms = $this->RoomsModel->all();
+    // Pagination: read ?page=N
+    $page = intval($this->io->get('page')) ?: 1;
+    $per_page = 3; // cards per page (changed to 3)
+    if($page < 1) $page = 1;
+    $offset = ($page - 1) * $per_page;
+
+    // fetch total count and paged rows
+    try{
+        $total = intval($this->RoomsModel->count());
+    } catch(Exception $e){
+        $total = 0;
+    }
+    $last_page = $per_page > 0 ? (int) ceil($total / $per_page) : 1;
+
+    try{
+        // Order rooms numerically by room_number so '1' appears first.
+        // Use CAST to ensure numeric ordering even if room_number is stored as string.
+        $sql = "SELECT * FROM rooms ORDER BY CAST(room_number AS UNSIGNED) ASC, room_number ASC LIMIT ? OFFSET ?";
+        $stmt = $this->RoomsModel->raw($sql, [$per_page, $offset]);
+        $rooms = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+    } catch(Exception $e){
+        $rooms = [];
+    }
+
+    $viewData = [
+        'rooms' => $rooms,
+        'per_page' => $per_page,
+        'current_page' => $page,
+        'last_page' => max(1, $last_page),
+        'total' => $total
+    ];
+
         if ($this->io->is_ajax()){
-            $this->call->view('admin/rooms_list', ['rooms' => $rooms]);
+            $this->call->view('admin/rooms_list', $viewData);
             return;
         }
         try{ $this->session->set_userdata('admin_initial_load', 'rooms'); } catch(Exception $e) { }
@@ -486,6 +543,20 @@ class AdminController extends Controller {
                 return;
             }
 
+            // Prevent updating room_number to one that already exists for another room
+            try{
+                $stmtDup = $this->RoomsModel->raw('SELECT room_id FROM rooms WHERE room_number = ? AND room_id != ? LIMIT 1', [$room_number, intval($id)]);
+                $dup = $stmtDup ? $stmtDup->fetch(PDO::FETCH_ASSOC) : false;
+                if($dup){
+                    $data['error'] = 'Room number already used by another room. Please choose a different room number.';
+                    $data['room'] = $room_new;
+                    $this->call->view('admin/rooms_edit', $data);
+                    return;
+                }
+            } catch(Exception $e){
+                error_log('[AdminController] rooms_update duplicate check failed: ' . $e->getMessage());
+            }
+
             $image_path = $room['image'];
             // handle replacing image
             if(isset($_FILES['image']) && $_FILES['image']['error'] !== UPLOAD_ERR_NO_FILE){
@@ -501,7 +572,10 @@ class AdminController extends Controller {
                     $image_path = 'uploads/rooms/' . $filename;
                     // optionally remove old image file (best-effort)
                     if(!empty($room['image'])){
-                        @unlink(PUBLIC_DIR . '/' . $room['image']);
+                        $oldPath = PUBLIC_DIR . '/' . $room['image'];
+                        if(is_file($oldPath)){
+                            @unlink($oldPath);
+                        }
                     }
                 } else {
                     $errs = $this->upload->get_errors();
@@ -542,9 +616,12 @@ class AdminController extends Controller {
         if(!$room){ echo 'Room not found'; return; }
 
         // attempt delete
-        if($this->RoomsModel->delete($id)){
-            // remove image file
-            if(!empty($room['image'])){@unlink(PUBLIC_DIR . '/' . $room['image']);}
+            if($this->RoomsModel->delete($id)){
+            // remove image file (best-effort, check existence first)
+            if(!empty($room['image'])){
+                $toDelete = PUBLIC_DIR . '/' . $room['image'];
+                if(is_file($toDelete)) {@unlink($toDelete);} 
+            }
             if($this->io->is_ajax()){ echo 'OK'; return; }
             redirect(site_url('admin/rooms'));
         } else {
@@ -567,8 +644,17 @@ class AdminController extends Controller {
             $end = $d->format('Y-m-d') . ' 23:59:59';
             $stmt = $this->PaymentsModel->raw("SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE payment_status = 'approved' AND payment_date BETWEEN ? AND ?", [$start, $end]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $val = (float) ($row['total'] ?? 0);
+            // fallback: sum bookings.total_amount if payments empty
+            if (empty($val) || $val <= 0){
+                try{
+                    $s2 = $this->BookingsModel->raw("SELECT COALESCE(SUM(total_amount),0) AS total FROM bookings WHERE status IN ('approved','completed') AND date_booked BETWEEN ? AND ?", [$start, $end]);
+                    $r2 = $s2->fetch(PDO::FETCH_ASSOC);
+                    $val = (float) ($r2['total'] ?? $val);
+                } catch(Exception $e){ /* ignore */ }
+            }
             $weekly['labels'][] = $label;
-            $weekly['values'][] = (float) ($row['total'] ?? 0);
+            $weekly['values'][] = $val;
         }
 
         // Monthly: this year by month
@@ -581,8 +667,16 @@ class AdminController extends Controller {
             $end = sprintf('%04d-%02d-%02d 23:59:59', $year, $m, $endDay);
             $stmt = $this->PaymentsModel->raw("SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE payment_status = 'approved' AND payment_date BETWEEN ? AND ?", [$start, $end]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $val = (float) ($row['total'] ?? 0);
+            if (empty($val) || $val <= 0){
+                try{
+                    $s2 = $this->BookingsModel->raw("SELECT COALESCE(SUM(total_amount),0) AS total FROM bookings WHERE status IN ('approved','completed') AND date_booked BETWEEN ? AND ?", [$start, $end]);
+                    $r2 = $s2->fetch(PDO::FETCH_ASSOC);
+                    $val = (float) ($r2['total'] ?? $val);
+                } catch(Exception $e){ }
+            }
             $monthly['labels'][] = $label;
-            $monthly['values'][] = (float) ($row['total'] ?? 0);
+            $monthly['values'][] = $val;
         }
 
         // Yearly: last 5 years
@@ -592,8 +686,16 @@ class AdminController extends Controller {
             $end = sprintf('%04d-12-31 23:59:59', $y);
             $stmt = $this->PaymentsModel->raw("SELECT COALESCE(SUM(amount),0) AS total FROM payments WHERE payment_status = 'approved' AND payment_date BETWEEN ? AND ?", [$start, $end]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $val = (float) ($row['total'] ?? 0);
+            if (empty($val) || $val <= 0){
+                try{
+                    $s2 = $this->BookingsModel->raw("SELECT COALESCE(SUM(total_amount),0) AS total FROM bookings WHERE status IN ('approved','completed') AND date_booked BETWEEN ? AND ?", [$start, $end]);
+                    $r2 = $s2->fetch(PDO::FETCH_ASSOC);
+                    $val = (float) ($r2['total'] ?? $val);
+                } catch(Exception $e){ }
+            }
             $yearly['labels'][] = (string)$y;
-            $yearly['values'][] = (float) ($row['total'] ?? 0);
+            $yearly['values'][] = $val;
         }
 
         $data = [

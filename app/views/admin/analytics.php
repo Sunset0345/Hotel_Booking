@@ -6,15 +6,15 @@
     <div style="display:flex;gap:12px;margin-bottom:16px">
         <div style="padding:12px;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
             <div style="font-size:12px;color:#666">Weekly Income</div>
-            <div style="font-size:20px;font-weight:600">$<?php echo number_format(array_sum($weekly['values']),2); ?></div>
+            <div style="font-size:20px;font-weight:600">₱<?php echo number_format(array_sum($weekly['values']),2); ?></div>
         </div>
         <div style="padding:12px;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
             <div style="font-size:12px;color:#666">Year to Date</div>
-            <div style="font-size:20px;font-weight:600">$<?php echo number_format(array_sum($monthly['values']),2); ?></div>
+            <div style="font-size:20px;font-weight:600">₱<?php echo number_format(array_sum($monthly['values']),2); ?></div>
         </div>
         <div style="padding:12px;background:#fff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.06)">
             <div style="font-size:12px;color:#666">Last 5 Years</div>
-            <div style="font-size:20px;font-weight:600">$<?php echo number_format(array_sum($yearly['values']),2); ?></div>
+            <div style="font-size:20px;font-weight:600">₱<?php echo number_format(array_sum($yearly['values']),2); ?></div>
         </div>
     </div>
 

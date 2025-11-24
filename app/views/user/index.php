@@ -109,19 +109,24 @@
 <!-- Headings moved outside the main card as requested -->
 <h2 id="user-title" style="text-align:center;margin:2.75rem 0 0.5rem 0;">Welcome to Blue Lagoon Hotel</h2>
 <h3 style="text-align:center;margin:0 0 1.75rem 0;color:rgba(255,255,255,0.9)">Rooms Available for Booking</h3>
+  <?php if(!empty($room_fragment)): ?>
+    <div style="max-width:920px;margin:0 auto 1.25rem auto;padding:0 12px;">
+      <?php echo $room_fragment; ?>
+    </div>
+  <?php endif; ?>
 
   <!-- Rooms moved to their own container outside the previous .card wrapper -->
   <div id="roomsArea" role="main" aria-labelledby="user-title" style="max-width:1200px;margin:1.5rem auto;padding:0 12px;">
     <div style="display:flex;flex-wrap:wrap;gap:18px;justify-content:center">
     <?php if(!empty($rooms)): ?>
       <?php foreach($rooms as $r): ?>
-        <?php
-          // Determine rendered state: if booking_state === 'booked' hide; if 'pending' show translucent; otherwise available
+          <?php
+          // Determine rendered state: hide only when booking_state === 'booked' (currently occupied)
           $booking_state = isset($r['booking_state']) ? $r['booking_state'] : 'available';
-          if($booking_state === 'booked') continue; // approved booking — hide from user listing
+          if($booking_state === 'booked') continue; // currently occupied — hide from user listing
           $is_pending = ($booking_state === 'pending');
         ?>
-    <div class="room-card<?php echo $is_pending ? ' room-pending' : ''; ?>" data-room-number="<?php echo htmlspecialchars($r['room_number'], ENT_QUOTES); ?>" data-room-type="<?php echo htmlspecialchars($r['room_type'], ENT_QUOTES); ?>" data-price="<?php echo number_format($r['price_per_night'],2); ?>" data-capacity="<?php echo intval($r['capacity']); ?>" data-description="<?php echo htmlspecialchars($r['description'] ?? '', ENT_QUOTES); ?>" data-image="<?php echo !empty($r['image']) ? htmlspecialchars(base_url() . PUBLIC_DIR . '/' . $r['image'], ENT_QUOTES) : ''; ?>" style="width:320px;background:#f8fafc;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,0.08);overflow:hidden;cursor:pointer;<?php echo $is_pending ? 'opacity:0.48;filter:grayscale(.18);pointer-events: none;' : ''; ?>">
+    <div class="room-card<?php echo $is_pending ? ' room-pending' : ''; ?>" data-room-number="<?php echo htmlspecialchars($r['room_number'], ENT_QUOTES); ?>" data-room-type="<?php echo htmlspecialchars($r['room_type'], ENT_QUOTES); ?>" data-price="<?php echo number_format($r['price_per_night'],2); ?>" data-capacity="<?php echo intval($r['capacity']); ?>" data-description="<?php echo htmlspecialchars($r['description'] ?? '', ENT_QUOTES); ?>" data-image="<?php echo !empty($r['image']) ? htmlspecialchars(base_url() . PUBLIC_DIR . '/' . $r['image'], ENT_QUOTES) : ''; ?>" style="width:320px;background:#f8fafc;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,0.08);overflow:hidden;cursor:pointer;">
           <div style="height:160px;background:#e2e8f0;">
             <?php if(!empty($r['image'])): ?>
               <img src="<?php echo base_url() . PUBLIC_DIR . '/' . $r['image']; ?>" style="width:100%;height:160px;object-fit:cover" alt="room image" />
@@ -130,12 +135,11 @@
           <div style="padding:16px">
             <strong style="font-size:1.2rem;color:#0b74de"><?php echo htmlspecialchars($r['room_number']); ?></strong>
             <div style="color:#334155;margin-bottom:6px"><?php echo htmlspecialchars($r['room_type']); ?></div>
-            <div style="margin-bottom:8px">$<?php echo number_format($r['price_per_night'],2); ?> · <?php echo intval($r['capacity']); ?> guests</div>
+            <div style="margin-bottom:8px">₱<?php echo number_format($r['price_per_night'],2); ?> · <?php echo intval($r['capacity']); ?> guests</div>
             <?php if($is_pending): ?>
-              <span style="display:inline-block;padding:8px 14px;background:#94a3b8;color:#fff;border-radius:6px;font-weight:600;opacity:0.9">Pending</span>
-            <?php else: ?>
-              <a href="<?php echo site_url('bookings/create/'.$r['room_id']); ?>" class="btn book-link" style="padding:8px 14px;background:#0b74de;color:#fff;border-radius:6px;text-decoration:none;font-weight:500">Book</a>
+              <span style="display:inline-block;padding:6px 10px;background:#f59e0b;color:#fff;border-radius:6px;font-weight:700;margin-right:8px;font-size:0.95rem">Pending</span>
             <?php endif; ?>
+            <a href="<?php echo site_url('bookings/create/'.$r['room_id']); ?>" class="btn book-link" style="padding:8px 14px;background:#0b74de;color:#fff;border-radius:6px;text-decoration:none;font-weight:500">Book</a>
           </div>
         </div>
       <?php endforeach; ?>

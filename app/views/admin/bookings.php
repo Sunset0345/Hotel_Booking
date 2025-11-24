@@ -26,7 +26,7 @@
                 <td style="padding:8px;vertical-align:top"><?php echo htmlspecialchars(isset($b['room_number']) ? $b['room_number'] : ''); ?></td>
                 <td style="padding:8px;vertical-align:top"><?php echo htmlspecialchars($b['check_in']); ?></td>
                 <td style="padding:8px;vertical-align:top"><?php echo htmlspecialchars($b['check_out']); ?></td>
-                <td style="padding:8px;vertical-align:top">$<?php echo number_format($b['total_amount'],2); ?></td>
+                <td style="padding:8px;vertical-align:top">₱<?php echo number_format($b['total_amount'],2); ?></td>
                 <td style="padding:8px;vertical-align:top"><?php echo htmlspecialchars($b['status']); ?></td>
                 <td style="padding:8px;vertical-align:top">
                     <?php if(isset($b['status']) && strtolower($b['status']) === 'approved'): ?>
